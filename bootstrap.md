@@ -23,4 +23,22 @@ Same report layout as sibling plugins, meaning:
 - gitignore and cursorignore
 - etc...
 
+## Color palette
+These are the colors for `fR3Z0` plugin and its `docs` website.
+
+**Colors:**
+- #E038E9 - Hot Magenta
+- #8A1AC6 - Electric Purple
+- #4B0082 - Deep Violet
+- #2FC1EE - Cyan
+- #3143D4 - Electric Blue
+- #F0F8FF - Near White
+- #000000 - Pure Black
+
+**Usage:**
+- Primary: Hot Magenta + Electric Purple
+- Secondary: Cyan + Electric Blue
+- Accent: Soft Pink Glow + Near White
+- Background: Pure Black
+
 
