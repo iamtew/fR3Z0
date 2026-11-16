@@ -1,6 +1,3 @@
-FIXME: WORK IN PROGRESS!
-FIXME: CLANKER SHALL NOT IMPLEMENT THIS YET!
-
 # fR3Z0 - Resonator effects VST3 plugin
 Effects plugin in the Stupid Audio plugin family!
 
