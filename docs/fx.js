@@ -114,8 +114,12 @@ function glowSprite(PIXI, tex, tint) {
   return s;
 }
 
-const NODE_PASSES = [[8, 0.08], [3.2, 0.22], [1.2, 0.85]];
+const NODE_PASSES = [[18, 0.08], [8, 0.18], [3.2, 0.45], [1.3, 1]];
+const ISO_PASSES = [[5, 0.08], [1.4, 0.32]];
+const TRACE_PASSES = [[6, 0.08], [1.8, 0.28]];
+const TRAIL = 8;
 function glowSegs(g, segs, color, scale = 1, passes = NODE_PASSES) {
+  if (!segs.length) return;
   for (const [width, alpha] of passes) {
     for (let i = 0; i < segs.length; i += 4) {
       g.moveTo(segs[i], segs[i + 1]);
@@ -130,6 +134,10 @@ function pairU(p, x, y, beat) {
     + p.a2 * beat * Math.cos(p.n2 * PI * x) * Math.cos(p.m2 * PI * y);
 }
 
+function ringEnv(t) {
+  return 0.88 + 0.12 * Math.exp(-((t % 4.2) / 4.2) * 3.4);
+}
+
 function fieldAt(t, x, y) {
   const period = HOLD + FADE;
   const n = PATTERNS.length;
@@ -138,18 +146,48 @@ function fieldAt(t, x, y) {
   const k = smooth(clamp((slot - i - HOLD / period) / (FADE / period), 0, 1));
   // Beat stays off zero so topology holds during a figure; envelope is a light ring.
   const beat = 0.78 + 0.22 * Math.cos(t * 1.25);
-  const env = 0.88 + 0.12 * Math.exp(-((t % 4.2) / 4.2) * 3.4);
   const a = pairU(PATTERNS[i], x, y, beat);
   const b = pairU(PATTERNS[(i + 1) % n], x, y, beat);
-  return env * (a + (b - a) * k);
+  return ringEnv(t) * (a + (b - a) * k);
+}
+
+function pushContour(grid, nx, w, h, segs, at) {
+  const cellW = w / GX;
+  const cellH = h / GY;
+  for (let j = 0; j < GY; j++) {
+    for (let i = 0; i < GX; i++) {
+      const ua = at(grid[j * nx + i]);
+      const ub = at(grid[j * nx + i + 1]);
+      const uc = at(grid[(j + 1) * nx + i + 1]);
+      const ud = at(grid[(j + 1) * nx + i]);
+      const x0 = i * cellW, y0 = j * cellH;
+      const x1 = x0 + cellW, y1 = y0 + cellH;
+      const hits = [];
+      if (ua * ub < 0) hits.push(lerp2(x0, y0, x1, y0, ua, ub));
+      if (ub * uc < 0) hits.push(lerp2(x1, y0, x1, y1, ub, uc));
+      if (ud * uc < 0) hits.push(lerp2(x0, y1, x1, y1, ud, uc));
+      if (ua * ud < 0) hits.push(lerp2(x0, y0, x0, y1, ua, ud));
+      if (hits.length >= 2) {
+        segs.push(hits[0][0], hits[0][1], hits[1][0], hits[1][1]);
+        if (hits.length === 4) segs.push(hits[2][0], hits[2][1], hits[3][0], hits[3][1]);
+      }
+    }
+  }
 }
 
 function chladniScene(PIXI, glow) {
   const root = new PIXI.Container();
+  const haze = new PIXI.Graphics();
   const nodes = new PIXI.Graphics();
+  const traces = new PIXI.Graphics();
+  haze.blendMode = 'add';
   nodes.blendMode = 'add';
+  traces.blendMode = 'add';
 
-  const sand = Array.from({ length: 110 }, (_, i) => {
+  const bloom = glowSprite(PIXI, glow, C.magenta);
+  bloom.anchor.set(0.5);
+
+  const sand = Array.from({ length: 180 }, (_, i) => {
     const tint = i % 5 === 0 ? C.magenta : (i % 3 === 0 ? C.cyan : C.white);
     const s = glowSprite(PIXI, glow, tint);
     s.nx = rand(0.03, 0.97);
@@ -157,14 +195,18 @@ function chladniScene(PIXI, glow) {
     s.vx = 0;
     s.vy = 0;
     s.size = i % 9 === 0 ? rand(0.28, 0.45) : rand(0.12, 0.22);
+    s.trail = [];
     return s;
   });
 
-  root.addChild(nodes, ...sand);
+  root.addChild(haze, nodes, traces, ...sand, bloom);
   root.alpha = fxOnly ? 1 : 0.62;
 
   const grid = new Float32Array((GX + 1) * (GY + 1));
-  const segs = [];
+  const zeroSegs = [];
+  const isoLo = [];
+  const isoHi = [];
+  const trailSegs = [];
 
   return {
     root,
@@ -176,33 +218,44 @@ function chladniScene(PIXI, glow) {
         for (let i = 0; i < nx; i++) grid[j * nx + i] = fieldAt(t, i / GX, y);
       }
 
-      segs.length = 0;
       const cellW = w / GX;
       const cellH = h / GY;
+      const env = ringEnv(t);
+      haze.clear();
       for (let j = 0; j < GY; j++) {
         for (let i = 0; i < GX; i++) {
           const ua = grid[j * nx + i];
           const ub = grid[j * nx + i + 1];
           const uc = grid[(j + 1) * nx + i + 1];
           const ud = grid[(j + 1) * nx + i];
-          const x0 = i * cellW, y0 = j * cellH;
-          const x1 = x0 + cellW, y1 = y0 + cellH;
-          const hits = [];
-          if (ua * ub < 0) hits.push(lerp2(x0, y0, x1, y0, ua, ub));
-          if (ub * uc < 0) hits.push(lerp2(x1, y0, x1, y1, ub, uc));
-          if (ud * uc < 0) hits.push(lerp2(x0, y1, x1, y1, ud, uc));
-          if (ua * ud < 0) hits.push(lerp2(x0, y0, x0, y1, ua, ud));
-          if (hits.length >= 2) {
-            segs.push(hits[0][0], hits[0][1], hits[1][0], hits[1][1]);
-            if (hits.length === 4) segs.push(hits[2][0], hits[2][1], hits[3][0], hits[3][1]);
-          }
+          const avg = (ua + ub + uc + ud) * 0.25;
+          const mag = Math.abs(avg);
+          if (mag < 0.04) continue;
+          haze.rect(i * cellW, j * cellH, cellW + 0.5, cellH + 0.5)
+            .fill({ color: avg >= 0 ? C.magenta : C.cyan, alpha: mag * 0.22 * env });
         }
       }
 
-      nodes.clear();
-      glowSegs(nodes, segs, C.magenta, 1.05);
-      glowSegs(nodes, segs, C.cyan, 0.55, [[6, 0.05], [1.6, 0.28]]);
+      zeroSegs.length = 0;
+      isoLo.length = 0;
+      isoHi.length = 0;
+      pushContour(grid, nx, w, h, zeroSegs, (v) => v);
+      pushContour(grid, nx, w, h, isoLo, (v) => Math.abs(v) - 0.35);
+      pushContour(grid, nx, w, h, isoHi, (v) => Math.abs(v) - 0.6);
 
+      nodes.clear();
+      glowSegs(nodes, isoHi, C.cyan, 0.7, ISO_PASSES);
+      glowSegs(nodes, isoLo, C.magenta, 0.85, ISO_PASSES);
+      glowSegs(nodes, zeroSegs, C.magenta, 1.15);
+      glowSegs(nodes, zeroSegs, C.cyan, 0.6, [[10, 0.08], [2.2, 0.35]]);
+      glowSegs(nodes, zeroSegs, C.white, 0.55, [[1.2, 0.7]]);
+
+      bloom.x = w * 0.5;
+      bloom.y = h * 0.5;
+      bloom.scale.set((Math.min(w, h) * 0.055) / 8, (Math.min(w, h) * 0.04) / 8);
+      bloom.alpha = 0.12 + 0.18 * ((env - 0.88) / 0.12);
+
+      trailSegs.length = 0;
       const e = 0.018;
       for (const s of sand) {
         if (dt > 0) {
@@ -212,10 +265,17 @@ function chladniScene(PIXI, glow) {
           // Down |u|: leave antinodes, pile on nodes.
           s.vx = s.vx * 0.86 - ux * 2.8;
           s.vy = s.vy * 0.86 - uy * 2.8;
-          s.vx += rand(-0.004, 0.004);
-          s.vy += rand(-0.004, 0.004);
+          s.vx += rand(-0.0015, 0.0015);
+          s.vy += rand(-0.0015, 0.0015);
           s.nx = clamp(s.nx + s.vx * dt, 0.02, 0.98);
           s.ny = clamp(s.ny + s.vy * dt, 0.02, 0.98);
+          // Traces only once a grain has found a node, so they don't web the antinodes.
+          if (u < 0.22) {
+            s.trail.push(s.nx, s.ny);
+            if (s.trail.length > TRAIL * 2) s.trail.splice(0, 2);
+          } else if (s.trail.length) {
+            s.trail.length = 0;
+          }
           s.alpha = 0.22 + 0.7 * clamp(1 - u * 2.2, 0, 1);
         } else {
           s.alpha = 0.55;
@@ -223,7 +283,16 @@ function chladniScene(PIXI, glow) {
         s.x = s.nx * w;
         s.y = s.ny * h;
         s.scale.set(s.size, s.size);
+        const tr = s.trail;
+        for (let k = 2; k < tr.length; k += 2) {
+          const dx = tr[k] - tr[k - 2], dy = tr[k + 1] - tr[k - 1];
+          if (dx * dx + dy * dy > 0.004) continue;
+          trailSegs.push(tr[k - 2] * w, tr[k - 1] * h, tr[k] * w, tr[k + 1] * h);
+        }
       }
+
+      traces.clear();
+      if (dt > 0) glowSegs(traces, trailSegs, C.white, 0.7, TRACE_PASSES);
     },
   };
 }
