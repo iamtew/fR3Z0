@@ -4,6 +4,8 @@ Spec: [docs/SPEC.md](docs/SPEC.md). Notes: [docs/Resonator_VST3_Core_Intermediat
 
 Resonator effect. Many host-automatable parameters (globals, eight voices, two LFOs). The graph edits the same parameters; it does not hide them. VST3. Part of Stupid Audio; sister of fN0B.
 
+Standalone stays in the jucer for debug and `just docs-screenshots`. Do not ship it. Dist is VST3 only.
+
 ## Stack
 - JUCE (Projucer workflow only – no CMake)
 - C++17, real-time safe: no allocations, no locks, no system calls in processBlock

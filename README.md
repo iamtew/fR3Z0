@@ -6,6 +6,8 @@
 
 VST3. Stupid Audio. [MIT](LICENSE). Site: [docs/](docs/index.html). Manual: [docs/docs.html](docs/docs.html).
 
+Standalone is built for debug and `just docs-screenshots` only. Dist ships the VST3. An effect needs a host; the standalone has no DAW input (noise still rings).
+
 The site backdrop is `docs/fx.js`, a PixiJS scene kept in sync with the other Stupid Audio sites. Add `?fx` to any page to preview it full screen with the page chrome hidden; `?fx=false` keeps the normal page.
 
 ## Release
