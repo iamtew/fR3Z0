@@ -348,14 +348,28 @@ fR3Z0AudioProcessorEditor::fR3Z0AudioProcessorEditor (fR3Z0AudioProcessor& p)
     }
 
     logo = juce::ImageCache::getFromMemory (BinaryData::logo_png, BinaryData::logo_pngSize);
-    setSize (kEditorW, kEditorH);
-    setResizable (true, true);
-    if (auto* c = getConstrainer())
-        c->setFixedAspectRatio ((double) kEditorW / (double) kEditorH);
+
+    using namespace fr3z0;
+    auto& lf = getLookAndFeel();
+    lf.setColour (juce::ComboBox::backgroundColourId, kPanel);
+    lf.setColour (juce::ComboBox::textColourId, kLight);
+    lf.setColour (juce::ComboBox::outlineColourId, kViolet);
+    lf.setColour (juce::PopupMenu::backgroundColourId, kPanel);
+    lf.setColour (juce::PopupMenu::textColourId, kLight);
+    lf.setColour (juce::TextButton::buttonColourId, kViolet);
+    lf.setColour (juce::TextButton::textColourOffId, kLight);
+    lf.setColour (juce::TextButton::textColourOnId, kLight);
+
+    refreshBar();
     baseW = kEditorW;
     baseH = kEditorH;
+    content.setSize (baseW, baseH);
+    setResizable (true, true);
+    setResizeLimits (baseW * 2 / 5, baseH * 2 / 5, baseW * 3 / 2, baseH * 3 / 2);
+    if (auto* c = getConstrainer())
+        c->setFixedAspectRatio ((double) baseW / (double) baseH);
+    setSize (baseW, baseH);
     startTimerHz (30);
-    refreshBar();
 }
 
 fR3Z0AudioProcessorEditor::~fR3Z0AudioProcessorEditor()
