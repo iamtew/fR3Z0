@@ -1,8 +1,7 @@
 #pragma once
 
 #include "ParameterIDs.h"
-#include "dsp/Presets.h"
-#include "dsp/Units.h"
+#include "../dsp/Units.h"
 
 #include <JuceHeader.h>
 
