@@ -29,10 +29,10 @@ docs-screenshots:
 # Derived: docs/logo.png (320, Lanczos EWA + unsharp), Builds/.../icon.ico per size the same way.
 # `just resave` does not refresh icon.ico when the PNG changes.
 docs-logo:
-    magick assets/logo.png -background none -colorspace RGB -filter Lanczos +distort Resize 320x320 -unsharp 0x0.5+0.5+0.008 -colorspace sRGB PNG32:docs/logo.png
+    magick assets/logo.png -background none -trim +repage -colorspace RGB -filter Lanczos +distort Resize 320x320 -unsharp 0x0.5+0.5+0.008 -colorspace sRGB PNG32:docs/logo.png
 
 icon: docs-logo
-    $dir = 'Builds\VisualStudio2022'; $pngs = @(); foreach ($s in 256,128,64,48,32,16) { $out = Join-Path $dir ("_ico{0}.png" -f $s); magick assets/logo.png -background none -colorspace RGB -filter Lanczos +distort Resize ${s}x${s} -unsharp 0x0.5+0.5+0.008 -colorspace sRGB PNG32:$out; $pngs += $out }; magick @pngs (Join-Path $dir 'icon.ico'); $pngs | Remove-Item -Force
+    $dir = 'Builds\VisualStudio2022'; $pngs = @(); foreach ($s in 256,128,64,48,32,16) { $out = Join-Path $dir ("_ico{0}.png" -f $s); magick assets/logo.png -background none -trim +repage -colorspace RGB -filter Lanczos +distort Resize ${s}x${s} -unsharp 0x0.5+0.5+0.008 -colorspace sRGB PNG32:$out; $pngs += $out }; magick @pngs (Join-Path $dir 'icon.ico'); $pngs | Remove-Item -Force
     Get-ChildItem Builds\VisualStudio2022 -Recurse -Filter resources.res | Remove-Item -Force
 
 # Debug and Release both build the solution (VST3 + standalone).
