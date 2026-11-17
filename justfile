@@ -1,0 +1,70 @@
+# fR3Z0 – Justfile (Projucer + MSBuild)
+
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
+JUCE_PATH := env_var_or_default("JUCE_PATH", env_var("USERPROFILE") + "\\JUCE")
+PROJUCER  := JUCE_PATH + "\\Projucer.exe"
+PROJECT   := "fR3Z0.jucer"
+SOLUTION  := "Builds\\VisualStudio2022\\fR3Z0.sln"
+# Bare `msbuild` is not on PATH with Build Tools alone.
+# CI sets MSBUILD to the runner's Visual Studio; this default stays the local Build Tools.
+MSBUILD   := env_var_or_default("MSBUILD", "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\MSBuild\\Current\\Bin\\MSBuild.exe")
+
+default:
+    @just --list
+
+projucer:
+    {{PROJUCER}} {{PROJECT}}
+
+resave:
+    {{PROJUCER}} --resave {{PROJECT}}
+    # OneDrive can lag the sln behind "Finished saving".
+    $n=0; while (-not (Test-Path '{{SOLUTION}}') -and $n -lt 20) { Start-Sleep -Milliseconds 250; $n++ }
+
+# Debug standalone must already exist. Interactive desktop only.
+docs-screenshots:
+    & './scripts/docs-screenshots.ps1'
+
+# assets/logo.png is the Affinity export. Source of truth. Never write that file.
+# Derived: docs/logo.png (320, Lanczos EWA + unsharp), Builds/.../icon.ico per size the same way.
+# `just resave` does not refresh icon.ico when the PNG changes.
+docs-logo:
+    magick assets/logo.png -background none -colorspace RGB -filter Lanczos +distort Resize 320x320 -unsharp 0x0.5+0.5+0.008 -colorspace sRGB PNG32:docs/logo.png
+
+icon: docs-logo
+    $dir = 'Builds\VisualStudio2022'; $pngs = @(); foreach ($s in 256,128,64,48,32,16) { $out = Join-Path $dir ("_ico{0}.png" -f $s); magick assets/logo.png -background none -colorspace RGB -filter Lanczos +distort Resize ${s}x${s} -unsharp 0x0.5+0.5+0.008 -colorspace sRGB PNG32:$out; $pngs += $out }; magick @pngs (Join-Path $dir 'icon.ico'); $pngs | Remove-Item -Force
+    Get-ChildItem Builds\VisualStudio2022 -Recurse -Filter resources.res | Remove-Item -Force
+
+# Debug and Release both build the solution (VST3 + standalone). Dist only ships the VST3.
+build-debug: resave
+    & '{{MSBUILD}}' {{SOLUTION}} /p:Configuration=Debug /p:Platform=x64 /m
+
+# Overwrites the installed VST3 (same path as the MSI). Close the DAW first. UAC for Common Files.
+install-debug: build-debug
+    Write-Host 'Overwrites Common Files\VST3\fR3Z0.vst3 (the installed plugin). Close the DAW first.'; $src = (Resolve-Path -LiteralPath 'Builds\VisualStudio2022\x64\Debug\VST3\fR3Z0.vst3').Path; $dest = Join-Path $env:ProgramFiles 'Common Files\VST3\fR3Z0.vst3'; $copy = "`$ErrorActionPreference='Stop'; if (Test-Path -LiteralPath '$dest') { Remove-Item -LiteralPath '$dest' -Recurse -Force }; Copy-Item -LiteralPath '$src' -Destination '$dest' -Recurse"; $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); if ($admin) { Invoke-Expression $copy } else { $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($copy)); $p = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile','-EncodedCommand',$enc); if ($null -eq $p -or $p.ExitCode -ne 0) { throw 'install-debug: elevated copy failed' } }; Write-Host "installed $dest"
+
+build-release: resave
+    & '{{MSBUILD}}' {{SOLUTION}} /p:Configuration=Release /p:Platform=x64 /m
+
+build-dist: build-release
+    if (Test-Path dist) { Remove-Item dist -Recurse -Force }
+    New-Item dist -ItemType Directory | Out-Null
+    $ver = ([xml](Get-Content '{{PROJECT}}')).JUCERPROJECT.version; Compress-Archive -Path 'Builds\VisualStudio2022\x64\Release\VST3\fR3Z0.vst3' -DestinationPath "dist\fR3Z0-$ver-win-x64-vst3.zip" -Force
+    just build-msi
+
+# Release binaries must already exist. First build downloads WiX.
+# `dotnet` on PATH when it has an SDK, otherwise %USERPROFILE%\.dotnet.
+build-msi:
+    $ver = ([xml](Get-Content '{{PROJECT}}')).JUCERPROJECT.version; $root = (Get-Location).Path; $dotnet = 'dotnet'; if (-not ((& dotnet --list-sdks) 2>$null)) { $dotnet = Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'; if (-not (Test-Path $dotnet)) { throw 'build-msi needs the .NET 8 SDK on PATH, or dotnet.exe in %USERPROFILE%\.dotnet' } }; New-Item -ItemType Directory -Force -Path dist | Out-Null; & $dotnet build installer\fR3Z0.wixproj -c Release -p:ProductVersion=$ver -p:Vst3Dir="$root\Builds\VisualStudio2022\x64\Release\VST3\fR3Z0.vst3" -p:IconDir="$root\Builds\VisualStudio2022"; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $msi = Get-ChildItem installer\bin -Recurse -Filter fR3Z0.msi | Select-Object -First 1; Copy-Item $msi.FullName "dist\fR3Z0-$ver-win-x64-installer.msi" -Force
+
+clean:
+    & '{{MSBUILD}}' {{SOLUTION}} /t:Clean /p:Configuration=Debug /p:Platform=x64
+    & '{{MSBUILD}}' {{SOLUTION}} /t:Clean /p:Configuration=Release /p:Platform=x64
+
+rebuild: clean build-debug
+
+vs:
+    start {{SOLUTION}}
+
+check:
+    cmd /c "call `"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat`" >nul && cl /nologo /EHsc /std:c++17 /I src tests\fr3z0_check.cpp /Fo:tests\fr3z0_check.obj /Fe:tests\fr3z0_check.exe && tests\fr3z0_check.exe"
