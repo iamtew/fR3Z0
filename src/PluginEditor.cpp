@@ -6,6 +6,35 @@ namespace
 constexpr int kEditorW = 980;
 constexpr int kEditorH = 640;
 constexpr int kPad = 8;
+constexpr int kLogoH = 28;
+
+// Square export has transparent padding. Crop so the header slot matches the loop.
+juce::Image cropOpaque (juce::Image src)
+{
+    if (! src.isValid())
+        return src;
+    juce::Image::BitmapData d (src, juce::Image::BitmapData::readOnly);
+    const int w = src.getWidth(), h = src.getHeight();
+    int x0 = w, y0 = h, x1 = 0, y1 = 0;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            if (d.getPixelColour (x, y).getAlpha() > 8)
+            {
+                x0 = juce::jmin (x0, x);
+                y0 = juce::jmin (y0, y);
+                x1 = juce::jmax (x1, x);
+                y1 = juce::jmax (y1, y);
+            }
+    if (x1 <= x0)
+        return src;
+    return src.getClippedImage ({ x0, y0, x1 - x0 + 1, y1 - y0 + 1 }).createCopy();
+}
+
+int titleStripW (const juce::Image& logo)
+{
+    const int logoW = logo.isValid() ? logo.getWidth() / 2 : kLogoH;
+    return juce::jmax (150, logoW + 122);
+}
 }
 
 using SA = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -363,7 +392,12 @@ fR3Z0AudioProcessorEditor::fR3Z0AudioProcessorEditor (fR3Z0AudioProcessor& p)
         lUniA[i] = std::make_unique<BA> (proc.apvts, ParamID::lUni[i], lUni[i]);
     }
 
-    logo = juce::ImageCache::getFromMemory (BinaryData::logo_png, BinaryData::logo_pngSize);
+    logo = cropOpaque (juce::ImageCache::getFromMemory (BinaryData::logo_png, BinaryData::logo_pngSize));
+    if (logo.isValid() && logo.getHeight() > 0)
+    {
+        const int dw = juce::jmax (kLogoH, kLogoH * logo.getWidth() / logo.getHeight());
+        logo = logo.rescaled (dw * 2, kLogoH * 2, juce::Graphics::highResamplingQuality);
+    }
 
     using namespace fr3z0;
     auto& lf = getLookAndFeel();
@@ -502,9 +536,14 @@ void fR3Z0AudioProcessorEditor::paintContent (juce::Graphics& g)
     g.fillAll (kBlack);
     drawWell (g, wellHeader, {});
     auto title = wellHeader.reduced (6, 4);
-    title = title.removeFromLeft (150).removeFromTop (28);
+    title = title.removeFromLeft (titleStripW (logo)).removeFromTop (kLogoH);
     if (logo.isValid())
-        g.drawImage (logo, title.removeFromLeft (28).toFloat(), juce::RectanglePlacement::centred);
+    {
+        const int logoW = logo.getWidth() / 2;
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.drawImage (logo, title.removeFromLeft (logoW).toFloat(), juce::RectanglePlacement::centred);
+        title.removeFromLeft (6);
+    }
     g.setColour (kMagenta);
     g.setFont (boldFont (18.f));
     g.drawText ("fR3Z0", title, juce::Justification::centredLeft, false);
@@ -528,7 +567,7 @@ void fR3Z0AudioProcessorEditor::layoutContent()
 
     wellHeader = r.removeFromTop (36);
     auto head = wellHeader.reduced (kInset, 4);
-    head.removeFromLeft (150);
+    head.removeFromLeft (titleStripW (logo));
     presetBar.setBounds (head.removeFromLeft (200).reduced (0, 2));
     freeze.setBounds (head.removeFromLeft (64).reduced (2, 2));
     kill.setBounds (head.removeFromLeft (56).reduced (2, 2));
