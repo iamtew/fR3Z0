@@ -64,6 +64,7 @@ private:
 
     void paintContent (juce::Graphics&);
     void layoutContent();
+    void drawWell (juce::Graphics&, juce::Rectangle<int>, const juce::String& caption, int lfoDot = -1);
     void timerCallback() override;
     void bindKnob (Knob& k, const char* id, const juce::String& name);
     void bindCombo (juce::ComboBox& c, std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>& a,
@@ -102,6 +103,7 @@ private:
     juce::ToggleButton lSync[2], lUni[2];
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lSyncA[2], lUniA[2];
 
+    juce::Rectangle<int> wellHeader, wellGraph, wellGlobal, wellVoice, wellLfo[2];
     int dragVoice = -1;
     int attachedVoice = -1;
     float vizHz[8] {}, vizQ[8] {}, vizPan[8] {}, vizGain[8] {}, vizEnergy[8] {}, vizLfo[2] {};

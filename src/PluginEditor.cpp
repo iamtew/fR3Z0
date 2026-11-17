@@ -142,9 +142,7 @@ void fR3Z0AudioProcessorEditor::Graph::paint (juce::Graphics& g)
     using namespace fr3z0;
     auto r = getLocalBounds().toFloat();
     g.setColour (kWell);
-    g.fillRoundedRectangle (r, 6.f);
-    g.setColour (kViolet);
-    g.drawRoundedRectangle (r.reduced (0.5f), 6.f, 1.f);
+    g.fillRoundedRectangle (r, 4.f);
 
     auto area = r.reduced (8.f);
 
@@ -410,40 +408,72 @@ void fR3Z0AudioProcessorEditor::resized()
     content.setBounds (0, 0, baseW, baseH);
 }
 
+void fR3Z0AudioProcessorEditor::drawWell (juce::Graphics& g, juce::Rectangle<int> r,
+                                          const juce::String& caption, int lfoDot)
+{
+    using namespace fr3z0;
+    auto f = r.toFloat();
+    g.setColour (kPanel);
+    g.fillRoundedRectangle (f, 6.f);
+    g.setColour (kViolet);
+    g.drawRoundedRectangle (f.reduced (0.5f), 6.f, 1.f);
+    if (caption.isNotEmpty())
+    {
+        auto cap = r.removeFromTop (14).reduced (8, 0);
+        g.setColour (kCyan);
+        g.setFont (boldFont (10.f));
+        g.drawText (caption, cap, juce::Justification::centredLeft, false);
+        if (lfoDot >= 0)
+        {
+            const float t = 0.5f + 0.5f * vizLfo[lfoDot];
+            g.setColour (lfoDot == 0 ? kCyan : kBlue);
+            g.fillEllipse ((float) cap.getRight() - 18.f - t * 24.f, (float) cap.getCentreY() - 4.f, 8.f, 8.f);
+        }
+    }
+}
+
 void fR3Z0AudioProcessorEditor::paintContent (juce::Graphics& g)
 {
     using namespace fr3z0;
     g.fillAll (kBlack);
-    auto title = juce::Rectangle<int> (kPad, kPad, 200, 28);
+    drawWell (g, wellHeader, {});
+    auto title = wellHeader.reduced (6, 4);
+    title = title.removeFromLeft (150).removeFromTop (28);
     if (logo.isValid())
         g.drawImage (logo, title.removeFromLeft (28).toFloat(), juce::RectanglePlacement::centred);
     g.setColour (kMagenta);
     g.setFont (boldFont (18.f));
     g.drawText ("fR3Z0", title, juce::Justification::centredLeft, false);
 
-    // LFO dots
-    g.setColour (kCyan);
-    const float p0 = 0.5f + 0.5f * vizLfo[0];
-    const float p1 = 0.5f + 0.5f * vizLfo[1];
-    g.fillEllipse (760.f + p0 * 40.f, 18.f, 8.f, 8.f);
-    g.setColour (kBlue);
-    g.fillEllipse (880.f + p1 * 40.f, 18.f, 8.f, 8.f);
+    drawWell (g, wellGraph, "Graph");
+    drawWell (g, wellGlobal, "Global");
+    drawWell (g, wellVoice, "Voice " + juce::String (proc.selectedVoice() + 1));
+    drawWell (g, wellLfo[0], "LFO 1", 0);
+    drawWell (g, wellLfo[1], "LFO 2", 1);
 }
 
 void fR3Z0AudioProcessorEditor::layoutContent()
 {
-    auto r = juce::Rectangle<int> (0, 0, baseW, baseH).reduced (kPad);
-    auto top = r.removeFromTop (32);
-    top.removeFromLeft (160);
-    presetBar.setBounds (top.removeFromLeft (220).reduced (0, 2));
-    freeze.setBounds (top.removeFromLeft (64).reduced (2, 2));
-    kill.setBounds (top.removeFromLeft (56).reduced (2, 2));
-    snap.setBounds (top.removeFromLeft (56).reduced (2, 2));
-    spectrum.setBounds (top.removeFromLeft (76).reduced (2, 2));
-    bypass.setBounds (top.removeFromLeft (64).reduced (2, 2));
-    scaleBox.setBounds (top.removeFromLeft (110).reduced (2, 2));
+    constexpr int kCap = 14;
+    constexpr int kGap = 4;
+    constexpr int kInset = 6;
 
-    graph.setBounds (r.removeFromTop (250).reduced (0, 4));
+    auto r = juce::Rectangle<int> (0, 0, baseW, baseH).reduced (kPad);
+
+    wellHeader = r.removeFromTop (36);
+    auto head = wellHeader.reduced (kInset, 4);
+    head.removeFromLeft (150);
+    presetBar.setBounds (head.removeFromLeft (200).reduced (0, 2));
+    freeze.setBounds (head.removeFromLeft (64).reduced (2, 2));
+    kill.setBounds (head.removeFromLeft (56).reduced (2, 2));
+    snap.setBounds (head.removeFromLeft (56).reduced (2, 2));
+    spectrum.setBounds (head.removeFromLeft (76).reduced (2, 2));
+    bypass.setBounds (head.removeFromLeft (64).reduced (2, 2));
+    scaleBox.setBounds (head.removeFromLeft (110).reduced (2, 2));
+
+    r.removeFromTop (kGap);
+    wellGraph = r.removeFromTop (230);
+    graph.setBounds (wellGraph.reduced (kInset).withTrimmedTop (kCap));
 
     auto place = [] (Knob& k, juce::Rectangle<int> cell)
     {
@@ -452,29 +482,36 @@ void fR3Z0AudioProcessorEditor::layoutContent()
         k.s.setBounds (cell);
     };
 
-    auto globals = r.removeFromTop (100);
+    r.removeFromTop (kGap);
+    wellGlobal = r.removeFromTop (108);
+    auto globals = wellGlobal.reduced (kInset).withTrimmedTop (kCap);
     Knob* gk[] = { &root, &decay, &intensity, &mix, &outGain, &width, &detune, &hp, &lp, &noise, &color };
     const int gw = globals.getWidth() / 11;
     for (int i = 0; i < 11; ++i)
         place (*gk[i], globals.removeFromLeft (gw).reduced (2, 0));
 
-    auto voice = r.removeFromTop (100);
-    vOn.setBounds (voice.removeFromLeft (44).reduced (2, 24));
-    vLink.setBounds (voice.removeFromLeft (48).reduced (2, 24));
+    r.removeFromTop (kGap);
+    wellVoice = r.removeFromTop (108);
+    auto voice = wellVoice.reduced (kInset).withTrimmedTop (kCap);
+    vOn.setBounds (voice.removeFromLeft (44).reduced (2, 18));
+    vLink.setBounds (voice.removeFromLeft (48).reduced (2, 18));
     Knob* vk[] = { &vSemi, &vCents, &vGain, &vPan, &vDecay, &vQ };
     const int vw = voice.getWidth() / 6;
     for (int i = 0; i < 6; ++i)
         place (*vk[i], voice.removeFromLeft (vw).reduced (2, 0));
 
-    auto lfos = r;
+    r.removeFromTop (kGap);
+    wellLfo[0] = r.removeFromLeft (r.getWidth() / 2).reduced (0, 0);
+    r.removeFromLeft (kGap);
+    wellLfo[1] = r;
     for (int i = 0; i < 2; ++i)
     {
-        auto col = lfos.removeFromLeft (lfos.getWidth() / (2 - i));
-        auto row1 = col.removeFromTop (28);
-        lShape[i].setBounds (row1.removeFromLeft (100).reduced (2, 2));
-        lSync[i].setBounds (row1.removeFromLeft (50).reduced (2, 2));
-        lDiv[i].setBounds (row1.removeFromLeft (80).reduced (2, 2));
-        lUni[i].setBounds (row1.removeFromLeft (50).reduced (2, 2));
+        auto col = wellLfo[i].reduced (kInset).withTrimmedTop (kCap);
+        auto row1 = col.removeFromTop (24);
+        lShape[i].setBounds (row1.removeFromLeft (90).reduced (2, 1));
+        lSync[i].setBounds (row1.removeFromLeft (48).reduced (2, 1));
+        lDiv[i].setBounds (row1.removeFromLeft (72).reduced (2, 1));
+        lUni[i].setBounds (row1.removeFromLeft (48).reduced (2, 1));
         Knob* lk[] = { &lRate[i], &lDepth[i], &lRoot[i], &lDecay[i], &lInt[i], &lWidth[i], &lMix[i] };
         const int lw = col.getWidth() / 7;
         for (int j = 0; j < 7; ++j)
@@ -509,7 +546,9 @@ void fR3Z0AudioProcessorEditor::timerCallback()
     }
     graph.repaint();
     refreshBar();
-    repaint (760, 10, 200, 24);
+    content.repaint (wellVoice);
+    content.repaint (wellLfo[0]);
+    content.repaint (wellLfo[1]);
 }
 
 void fR3Z0AudioProcessorEditor::refreshBar()
