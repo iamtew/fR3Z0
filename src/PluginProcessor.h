@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dsp/Bank.h"
+#include "dsp/Presets.h"
 #include "parameters/ParameterLayout.h"
 
 #include <JuceHeader.h>
