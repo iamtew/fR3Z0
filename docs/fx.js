@@ -1,19 +1,27 @@
-// PixiJS backdrop: a churn maw eating toward the viewer, full-viewport, no CDN.
-const C = { mint: 0xE038E9, amber: 0x2FC1EE, light: 0xF0F8FF, grey: 0x8A1AC6, ink: 0x000000,
-  silver: 0x3143D4 };
-const SQUASH = 0.38;  // lens squash: the maw is wider than it is tall
-const SPIN = 0.75;    // rigid turn, rad/s
-const ROT = 0.3;      // rotation clock multiplier; slows the churn, not the gulp
-const SPIRAL = 2.4;   // radians each arm wraps from rim to throat
-const SHEAR = 0.9;    // differential knead, radians; bounded so the arms stay readable
-const GULP = 5.5;     // seconds per swallow
-const FILL = 1.08;    // 1 inscribes the maw; a little over 1 lets the rim bleed past the edges
-const ARMS = 9;
-const SAMPLES = 30;
-const TAU = Math.PI * 2;
+// PixiJS backdrop: Chladni plate, full-viewport, no CDN.
+const C = { magenta: 0xE038E9, cyan: 0x2FC1EE, white: 0xF0F8FF };
+const PI = Math.PI;
+const HOLD = 7;     // seconds a figure sits so sand can settle
+const FADE = 1.5;   // crossfade into the next catalog entry
+const GX = 64;      // nodal grid, cells
+const GY = 36;
+const NODE_EPS = 1e-6;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const smooth = (k) => k * k * (3 - 2 * k);
+
+// Distinct topologies: cells, stripes, crosses, diamonds — not a slow drift of one plate.
+const PATTERNS = [
+  { n1: 4, m1: 4, n2: 2, m2: 6, a1: 1, a2: 0.22 },
+  { n1: 1, m1: 1, n2: 5, m2: 1, a1: 1, a2: 0.28 },
+  { n1: 3, m1: 5, n2: 4, m2: 2, a1: 1, a2: 0.22 },
+  { n1: 3, m1: 1, n2: 1, m2: 5, a1: 1, a2: 0.26 },
+  { n1: 5, m1: 3, n2: 6, m2: 2, a1: 1, a2: 0.20 },
+  { n1: 2, m1: 5, n2: 7, m2: 1, a1: 1, a2: 0.24 },
+  { n1: 6, m1: 4, n2: 3, m2: 3, a1: 1, a2: 0.22 },
+  { n1: 2, m1: 3, n2: 1, m2: 4, a1: 1, a2: 0.22 },
+];
 
 // ?fx / ?fx=true keeps only the canvas. ?fx=false / 0 / off stays a normal page.
 const fxRaw = new URLSearchParams(location.search).get('fx');
@@ -47,7 +55,7 @@ async function start() {
   });
 
   const glow = glowTexture(PIXI);
-  const scene = mawScene(PIXI, glow);
+  const scene = chladniScene(PIXI, glow);
   app.stage.addChild(scene.root);
   bootTicker(app, scene);
 }
@@ -57,7 +65,7 @@ function bootTicker(app, scene) {
     app.ticker.stop();
     const still = () => {
       const { width: w, height: h } = app.screen;
-      scene.update(8, w, h, 0);
+      scene.update(HOLD * 0.5, w, h, 0);
       app.render();
     };
     addEventListener('resize', () => requestAnimationFrame(still));
@@ -106,182 +114,122 @@ function glowSprite(PIXI, tex, tint) {
   return s;
 }
 
-const GLOW_PASSES = [[22, 0.05], [10, 0.14], [2.5, 1]];
-function glowLine(g, pts, color, scale = 1, passes = GLOW_PASSES) {
+const NODE_PASSES = [[8, 0.08], [3.2, 0.22], [1.2, 0.85]];
+function glowSegs(g, segs, color, scale = 1, passes = NODE_PASSES) {
   for (const [width, alpha] of passes) {
-    g.moveTo(pts[0], pts[1]);
-    for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
-    g.stroke({ width: width * scale, color, alpha, cap: 'round', join: 'round' });
+    for (let i = 0; i < segs.length; i += 4) {
+      g.moveTo(segs[i], segs[i + 1]);
+      g.lineTo(segs[i + 2], segs[i + 3]);
+    }
+    g.stroke({ width: width * scale, color, alpha, cap: 'round' });
   }
 }
 
-// Dim body under a bright head that runs inward: the eating read.
-const BODY_PASSES = [[18, 0.05], [8, 0.13], [2.2, 0.5]];
-const HEAD_PASSES = [[18, 0.12], [7, 0.4], [2.2, 1]];
-// Background waveforms stay faint enough to read as texture, not as content.
-const WAVE_PASSES = [[14, 0.03], [6, 0.07], [1.6, 0.18]];
-const ARM_COLORS = [C.mint, C.mint, C.amber, C.grey, C.mint, C.amber, C.mint, C.grey, C.mint];
+function pairU(p, x, y, beat) {
+  return p.a1 * Math.cos(p.n1 * PI * x) * Math.cos(p.m1 * PI * y)
+    + p.a2 * beat * Math.cos(p.n2 * PI * x) * Math.cos(p.m2 * PI * y);
+}
 
-// A wide horizontal funnel. Strands shear against each other, debris spirals in,
-// and the ink slit swallows both on every gulp.
-function mawScene(PIXI, glow) {
+function fieldAt(t, x, y) {
+  const period = HOLD + FADE;
+  const n = PATTERNS.length;
+  const slot = ((t / period) % n + n) % n;
+  const i = Math.floor(slot);
+  const k = smooth(clamp((slot - i - HOLD / period) / (FADE / period), 0, 1));
+  // Beat stays off zero so topology holds during a figure; envelope is a light ring.
+  const beat = 0.78 + 0.22 * Math.cos(t * 1.25);
+  const env = 0.88 + 0.12 * Math.exp(-((t % 4.2) / 4.2) * 3.4);
+  const a = pairU(PATTERNS[i], x, y, beat);
+  const b = pairU(PATTERNS[(i + 1) % n], x, y, beat);
+  return env * (a + (b - a) * k);
+}
+
+function chladniScene(PIXI, glow) {
   const root = new PIXI.Container();
-  const waves = new PIXI.Graphics();
-  const arms = new PIXI.Graphics();
-  const pupil = new PIXI.Graphics();
-  const core = new PIXI.Graphics();
-  const shock = new PIXI.Graphics();
-  waves.blendMode = 'add';
-  arms.blendMode = 'add';
-  core.blendMode = 'add';
-  shock.blendMode = 'add';
+  const nodes = new PIXI.Graphics();
+  nodes.blendMode = 'add';
 
-  const debris = Array.from({ length: 120 }, (_, i) => {
-    const s = glowSprite(PIXI, glow, Math.random() < 0.7 ? C.mint : C.amber);
-    s.u = rand(0.1, 1.16);            // 0 throat .. 1 rim, so a resize cannot strand it
-    s.th = rand(0, TAU);
-    s.su = rand(0.04, 0.15);          // radial speed, disc widths per second
-    s.size = i % 11 === 0 ? rand(0.45, 0.8) : rand(0.09, 0.26);
-    s.alpha = 0;
+  const sand = Array.from({ length: 110 }, (_, i) => {
+    const tint = i % 5 === 0 ? C.magenta : (i % 3 === 0 ? C.cyan : C.white);
+    const s = glowSprite(PIXI, glow, tint);
+    s.nx = rand(0.03, 0.97);
+    s.ny = rand(0.03, 0.97);
+    s.vx = 0;
+    s.vy = 0;
+    s.size = i % 9 === 0 ? rand(0.28, 0.45) : rand(0.12, 0.22);
     return s;
   });
 
-  const bloom = glowSprite(PIXI, glow, C.mint);
-  bloom.alpha = 0;
-
-  // Order matters: the slit has to swallow the strands and the debris.
-  root.addChild(waves, arms, ...debris, pupil, bloom, core, shock);
+  root.addChild(nodes, ...sand);
   root.alpha = fxOnly ? 1 : 0.62;
+
+  const grid = new Float32Array((GX + 1) * (GY + 1));
+  const segs = [];
 
   return {
     root,
     update(t, w, h, dt) {
-      // One swallow per GULP, decaying fast so it reads as a gulp, not a beat.
-      const env = Math.exp(-((t % GULP) / GULP) * 4.6);
-      // Rotation runs on its own clock: ROT slows the churn without slowing the swallow.
-      const ts = t * ROT;
-      const spin = ts * SPIN;
-      // Size the maw to the viewport, not to min(w, h): the lens squash means the
-      // vertical extent is R * SQUASH, so both axes have to be considered. Taking
-      // the smaller of the two radii inscribes the ellipse, so the rim just
-      // touches one pair of viewport edges and nothing is cropped off.
-      const R = Math.min(w * 0.5, (h * 0.5) / SQUASH) * FILL * (1 + 0.04 * env);
-      const Rin = R * 0.05;
-      const cx = w * 0.5;
-      const cy = h * (fxOnly ? 0.5 : 0.46);
-
-      // u = 0 at the throat, 1 at the rim. The spiral plus the shearing term is
-      // what makes neighbouring strands knead against each other instead of
-      // turning like one rigid record. The ripple keeps them organic, not CAD.
-      const at = (a, u) => {
-        const wob = 1 + 0.05 * Math.sin(u * 9 - ts * 1.7 + a * 1.9);
-        const r = (Rin + (R - Rin) * u) * wob;
-        const th = (a / ARMS) * TAU - SPIRAL * u - spin - SHEAR * Math.sin(ts * 1.1 - u * 3.4);
-        return [cx + Math.cos(th) * r, cy + Math.sin(th) * r * SQUASH];
-      };
-
-      arms.clear();
-      for (let a = 0; a < ARMS; a++) {
-        const color = ARM_COLORS[a];
-        const pts = [];
-        for (let i = 0; i <= SAMPLES; i++) pts.push(...at(a, i / SAMPLES));
-        // Throat half is a faint thread, rim half carries the body: strands thin
-        // as they are eaten. Two polylines, not one, so the taper reads.
-        const mid = (SAMPLES >> 1) * 2;
-        glowLine(arms, pts.slice(0, mid + 4), color, 0.45, BODY_PASSES);
-        glowLine(arms, pts.slice(mid), color, 1.2, BODY_PASSES);
-        // Two bright heads per strand, sliding rim -> throat. Each is its own
-        // short polyline; a shared point list would chord across the gaps.
-        for (let p = 0; p < 2; p++) {
-          const u = 1 - ((ts * 0.26 + a * 0.19 + p * 0.5) % 1);
-          const seg = [
-            ...at(a, Math.min(1, u + 0.045)),
-            ...at(a, u),
-            ...at(a, Math.max(0, u - 0.045)),
-          ];
-          glowLine(arms, seg, color, 1, HEAD_PASSES);
-        }
-      }
-      // Rim ellipses: depth, and a horizon for the funnel.
-      for (const [rr, alpha] of [[R, 0.16], [R * 0.62, 0.09], [R * 1.1, 0.05]]) {
-        arms.ellipse(cx, cy, rr, rr * SQUASH).stroke({ width: 1, color: C.silver, alpha });
+      const nx = GX + 1;
+      const ny = GY + 1;
+      for (let j = 0; j < ny; j++) {
+        const y = j / GY;
+        for (let i = 0; i < nx; i++) grid[j * nx + i] = fieldAt(t, i / GX, y);
       }
 
-      // Quiet waveforms in the bands the maw leaves empty, travelling left to
-      // right so the frame keeps moving out there without competing with it.
-      // Positions come from the real gap above and below the rim, and a band is
-      // skipped when the maw already covers that space.
-      waves.clear();
-      const half = R * SQUASH;
-      const bands = [
-        { gap: cy - half, at: cy - half - (cy - half) * 0.5, color: C.grey, speed: 1.5, phase: 0 },
-        { gap: h - cy - half, at: cy + half + (h - cy - half) * 0.5, color: C.mint, speed: 2.4, phase: 2.1 },
-      ];
-      for (const b of bands) {
-        if (b.gap < h * 0.05) continue;
-        const pts = [];
-        const spread = Math.min(h * 0.045, b.gap * 0.42);
-        for (let x = -20; x <= w + 20; x += 6) {
-          const u = x / w;
-          // Taper at both ends so the line fades in and out, never gets cut off.
-          const taper = Math.sin(Math.PI * u);
-          pts.push(x, b.at + spread * Math.sin(u * 9 - ts * b.speed + b.phase) * taper);
-        }
-        glowLine(waves, pts, b.color, 1, WAVE_PASSES);
-      }
-
-      // The slit opens when it eats.
-      const rx = R * 0.5 * (1 + 0.08 * env);
-      const ry = R * 0.13 * (1 + 0.45 * env);
-      pupil.clear();
-      pupil.ellipse(cx, cy, rx * 1.12, ry * 1.25).fill({ color: C.ink, alpha: 0.55 });
-      pupil.ellipse(cx, cy, rx, ry).fill({ color: C.ink, alpha: 0.95 });
-
-      bloom.x = cx;
-      bloom.y = cy;
-      bloom.scale.set(R / 45, (R / 45) * 0.21);
-      bloom.alpha = 0.16 + 0.22 * env;
-
-      // Hot seam: mint halo, white core flickering, amber under-fringe.
-      core.clear();
-      const seam = [];
-      const step = rx / Math.max(12, Math.round(rx / 22));
-      for (let x = cx - rx; x <= cx + rx; x += step) {
-        seam.push(x, cy + Math.sin(x * 0.02 + ts * 3) * ry * 0.12);
-      }
-      glowLine(core, seam, C.mint, 1.9, [[30, 0.06], [12, 0.14]]);
-      glowLine(core, [cx - rx, cy + ry * 0.5, cx + rx, cy + ry * 0.5], C.amber, 0.8, [[8, 0.10], [2, 0.35]]);
-      glowLine(core, seam, C.light, 1, [[9, 0.18], [3, 0.7], [1.4, 1]]);
-
-      // One ring per gulp, expanding and dying before the next.
-      const k = 1 - (t % GULP) / GULP;
-      const rr = R * (0.5 + 0.62 * (1 - k));
-      shock.clear();
-      shock.ellipse(cx, cy, rr, rr * SQUASH * 0.55).stroke({ width: 1 + 2 * k, color: C.mint, alpha: 0.32 * k * k });
-      shock.ellipse(cx, cy, rr * 0.8, rr * SQUASH * 0.44).stroke({ width: 1, color: C.amber, alpha: 0.18 * k * k });
-
-      for (const s of debris) {
-        if (dt > 0) {
-          s.u -= s.su * dt;
-          if (s.u < 0.08) {
-            s.u = rand(1.02, 1.18);
-            s.th = rand(0, TAU);
-            s.su = rand(0.04, 0.15);
+      segs.length = 0;
+      const cellW = w / GX;
+      const cellH = h / GY;
+      for (let j = 0; j < GY; j++) {
+        for (let i = 0; i < GX; i++) {
+          const ua = grid[j * nx + i];
+          const ub = grid[j * nx + i + 1];
+          const uc = grid[(j + 1) * nx + i + 1];
+          const ud = grid[(j + 1) * nx + i];
+          const x0 = i * cellW, y0 = j * cellH;
+          const x1 = x0 + cellW, y1 = y0 + cellH;
+          const hits = [];
+          if (ua * ub < 0) hits.push(lerp2(x0, y0, x1, y0, ua, ub));
+          if (ub * uc < 0) hits.push(lerp2(x1, y0, x1, y1, ub, uc));
+          if (ud * uc < 0) hits.push(lerp2(x0, y1, x1, y1, ud, uc));
+          if (ua * ud < 0) hits.push(lerp2(x0, y0, x0, y1, ua, ud));
+          if (hits.length >= 2) {
+            segs.push(hits[0][0], hits[0][1], hits[1][0], hits[1][1]);
+            if (hits.length === 4) segs.push(hits[2][0], hits[2][1], hits[3][0], hits[3][1]);
           }
-          s.th -= (SPIN + 0.9 / (0.3 + s.u)) * ROT * dt;
         }
-        const r = Rin + (R - Rin) * s.u;
-        const ct = Math.cos(s.th), st = Math.sin(s.th);
-        s.x = cx + ct * r;
-        s.y = cy + st * r * SQUASH;
-        // Streak along the actual travel: tangential plus inward.
-        const om = (SPIN + 0.9 / (0.3 + s.u)) * ROT;
-        const vr = (R - Rin) * s.su;
-        s.rotation = Math.atan2(-ct * r * SQUASH * om - st * SQUASH * vr, st * r * om - ct * vr);
-        const wpx = s.size * R * (0.05 + 0.2 * s.u);
-        s.scale.set((wpx * 4) / 64, wpx / 64);
-        s.alpha = 0.55 * clamp((1.14 - s.u) / 0.14, 0, 1) * clamp((s.u - 0.06) / 0.18, 0, 1);
+      }
+
+      nodes.clear();
+      glowSegs(nodes, segs, C.magenta, 1.05);
+      glowSegs(nodes, segs, C.cyan, 0.55, [[6, 0.05], [1.6, 0.28]]);
+
+      const e = 0.018;
+      for (const s of sand) {
+        if (dt > 0) {
+          const u = Math.abs(fieldAt(t, s.nx, s.ny));
+          const ux = Math.abs(fieldAt(t, s.nx + e, s.ny)) - Math.abs(fieldAt(t, s.nx - e, s.ny));
+          const uy = Math.abs(fieldAt(t, s.nx, s.ny + e)) - Math.abs(fieldAt(t, s.nx, s.ny - e));
+          // Down |u|: leave antinodes, pile on nodes.
+          s.vx = s.vx * 0.86 - ux * 2.8;
+          s.vy = s.vy * 0.86 - uy * 2.8;
+          s.vx += rand(-0.004, 0.004);
+          s.vy += rand(-0.004, 0.004);
+          s.nx = clamp(s.nx + s.vx * dt, 0.02, 0.98);
+          s.ny = clamp(s.ny + s.vy * dt, 0.02, 0.98);
+          s.alpha = 0.22 + 0.7 * clamp(1 - u * 2.2, 0, 1);
+        } else {
+          s.alpha = 0.55;
+        }
+        s.x = s.nx * w;
+        s.y = s.ny * h;
+        s.scale.set(s.size, s.size);
       }
     },
   };
+}
+
+function lerp2(x0, y0, x1, y1, u0, u1) {
+  const d = u0 - u1;
+  const t = Math.abs(d) < NODE_EPS ? 0.5 : u0 / d;
+  return [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t];
 }
