@@ -3,8 +3,8 @@ const C = { magenta: 0xE038E9, cyan: 0x2FC1EE, white: 0xF0F8FF };
 const PI = Math.PI;
 const HOLD = 7;     // seconds a figure sits so sand can settle
 const FADE = 1.5;   // crossfade into the next catalog entry
-const GX = 64;      // nodal grid, cells
-const GY = 36;
+const GX = 40;      // nodal grid, cells — coarse enough for old GPUs
+const GY = 22;
 const NODE_EPS = 1e-6;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
@@ -48,10 +48,11 @@ async function start() {
     canvas: document.getElementById('fx'),
     resizeTo: window,
     backgroundAlpha: 0,
-    antialias: true,
+    antialias: false,
     autoDensity: true,
-    resolution: Math.min(devicePixelRatio || 1, 2),
+    resolution: 1,
     preference: 'webgl',
+    powerPreference: 'low-power',
   });
 
   const glow = glowTexture(PIXI);
@@ -92,7 +93,7 @@ function bootTicker(app, scene) {
   });
 }
 
-function glowTexture(PIXI, size = 64) {
+function glowTexture(PIXI, size = 32) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const g = c.getContext('2d');
@@ -114,10 +115,10 @@ function glowSprite(PIXI, tex, tint) {
   return s;
 }
 
-const NODE_PASSES = [[18, 0.08], [8, 0.18], [3.2, 0.45], [1.3, 1]];
-const ISO_PASSES = [[5, 0.08], [1.4, 0.32]];
-const TRACE_PASSES = [[6, 0.08], [1.8, 0.28]];
-const TRAIL = 8;
+const NODE_PASSES = [[10, 0.16], [2.2, 0.9]];
+const ISO_PASSES = [[1.6, 0.4]];
+const TRACE_PASSES = [[1.6, 0.28]];
+const TRAIL = 5;
 function glowSegs(g, segs, color, scale = 1, passes = NODE_PASSES) {
   if (!segs.length) return;
   for (const [width, alpha] of passes) {
@@ -138,38 +139,71 @@ function ringEnv(t) {
   return 0.88 + 0.12 * Math.exp(-((t % 4.2) / 4.2) * 3.4);
 }
 
-function fieldAt(t, x, y) {
+// One closure per frame so the grid is not re-deriving beat/env 900 times.
+function makeField(t) {
   const period = HOLD + FADE;
   const n = PATTERNS.length;
   const slot = ((t / period) % n + n) % n;
   const i = Math.floor(slot);
   const k = smooth(clamp((slot - i - HOLD / period) / (FADE / period), 0, 1));
-  // Beat stays off zero so topology holds during a figure; envelope is a light ring.
   const beat = 0.78 + 0.22 * Math.cos(t * 1.25);
-  const a = pairU(PATTERNS[i], x, y, beat);
-  const b = pairU(PATTERNS[(i + 1) % n], x, y, beat);
-  return ringEnv(t) * (a + (b - a) * k);
+  const env = ringEnv(t);
+  const p0 = PATTERNS[i];
+  const p1 = PATTERNS[(i + 1) % n];
+  return (x, y) => {
+    const a = pairU(p0, x, y, beat);
+    const b = pairU(p1, x, y, beat);
+    return env * (a + (b - a) * k);
+  };
+}
+
+function sampleGrid(grid, nx, x, y) {
+  const fx = clamp(x * GX, 0, GX - 1.001);
+  const fy = clamp(y * GY, 0, GY - 1.001);
+  const i = fx | 0;
+  const j = fy | 0;
+  const tx = fx - i;
+  const ty = fy - j;
+  const i1 = i + 1;
+  const row = j * nx;
+  const row1 = row + nx;
+  const a = grid[row + i], b = grid[row + i1];
+  const c = grid[row1 + i], d = grid[row1 + i1];
+  return a * (1 - tx) * (1 - ty) + b * tx * (1 - ty) + c * (1 - tx) * ty + d * tx * ty;
+}
+
+const HIT = new Float32Array(8);
+function hitEdge(n, x0, y0, x1, y1, u0, u1) {
+  const d = u0 - u1;
+  const t = Math.abs(d) < NODE_EPS ? 0.5 : u0 / d;
+  HIT[n] = x0 + (x1 - x0) * t;
+  HIT[n + 1] = y0 + (y1 - y0) * t;
+  return n + 2;
 }
 
 function pushContour(grid, nx, w, h, segs, at) {
   const cellW = w / GX;
   const cellH = h / GY;
   for (let j = 0; j < GY; j++) {
+    const row = j * nx;
+    const row1 = row + nx;
+    const y0 = j * cellH;
+    const y1 = y0 + cellH;
     for (let i = 0; i < GX; i++) {
-      const ua = at(grid[j * nx + i]);
-      const ub = at(grid[j * nx + i + 1]);
-      const uc = at(grid[(j + 1) * nx + i + 1]);
-      const ud = at(grid[(j + 1) * nx + i]);
-      const x0 = i * cellW, y0 = j * cellH;
-      const x1 = x0 + cellW, y1 = y0 + cellH;
-      const hits = [];
-      if (ua * ub < 0) hits.push(lerp2(x0, y0, x1, y0, ua, ub));
-      if (ub * uc < 0) hits.push(lerp2(x1, y0, x1, y1, ub, uc));
-      if (ud * uc < 0) hits.push(lerp2(x0, y1, x1, y1, ud, uc));
-      if (ua * ud < 0) hits.push(lerp2(x0, y0, x0, y1, ua, ud));
-      if (hits.length >= 2) {
-        segs.push(hits[0][0], hits[0][1], hits[1][0], hits[1][1]);
-        if (hits.length === 4) segs.push(hits[2][0], hits[2][1], hits[3][0], hits[3][1]);
+      const ua = at(grid[row + i]);
+      const ub = at(grid[row + i + 1]);
+      const uc = at(grid[row1 + i + 1]);
+      const ud = at(grid[row1 + i]);
+      const x0 = i * cellW;
+      const x1 = x0 + cellW;
+      let n = 0;
+      if (ua * ub < 0) n = hitEdge(n, x0, y0, x1, y0, ua, ub);
+      if (ub * uc < 0) n = hitEdge(n, x1, y0, x1, y1, ub, uc);
+      if (ud * uc < 0) n = hitEdge(n, x0, y1, x1, y1, ud, uc);
+      if (ua * ud < 0) n = hitEdge(n, x0, y0, x0, y1, ua, ud);
+      if (n >= 4) {
+        segs.push(HIT[0], HIT[1], HIT[2], HIT[3]);
+        if (n === 8) segs.push(HIT[4], HIT[5], HIT[6], HIT[7]);
       }
     }
   }
@@ -177,17 +211,25 @@ function pushContour(grid, nx, w, h, segs, at) {
 
 function chladniScene(PIXI, glow) {
   const root = new PIXI.Container();
-  const haze = new PIXI.Graphics();
+  const hazeCanvas = document.createElement('canvas');
+  hazeCanvas.width = GX;
+  hazeCanvas.height = GY;
+  const hazeCtx = hazeCanvas.getContext('2d', { willReadFrequently: true });
+  const hazePix = hazeCtx.createImageData(GX, GY);
+  const hazeTex = PIXI.Texture.from(hazeCanvas);
+  hazeTex.source.scaleMode = 'linear';
+  const haze = new PIXI.Sprite(hazeTex);
+  haze.blendMode = 'add';
+  haze.alpha = 0.55;
+
   const nodes = new PIXI.Graphics();
   const traces = new PIXI.Graphics();
-  haze.blendMode = 'add';
   nodes.blendMode = 'add';
   traces.blendMode = 'add';
 
   const bloom = glowSprite(PIXI, glow, C.magenta);
-  bloom.anchor.set(0.5);
 
-  const sand = Array.from({ length: 180 }, (_, i) => {
+  const sand = Array.from({ length: 80 }, (_, i) => {
     const tint = i % 5 === 0 ? C.magenta : (i % 3 === 0 ? C.cyan : C.white);
     const s = glowSprite(PIXI, glow, tint);
     s.nx = rand(0.03, 0.97);
@@ -205,7 +247,6 @@ function chladniScene(PIXI, glow) {
   const grid = new Float32Array((GX + 1) * (GY + 1));
   const zeroSegs = [];
   const isoLo = [];
-  const isoHi = [];
   const trailSegs = [];
 
   return {
@@ -213,42 +254,43 @@ function chladniScene(PIXI, glow) {
     update(t, w, h, dt) {
       const nx = GX + 1;
       const ny = GY + 1;
+      const field = makeField(t);
       for (let j = 0; j < ny; j++) {
         const y = j / GY;
-        for (let i = 0; i < nx; i++) grid[j * nx + i] = fieldAt(t, i / GX, y);
+        const row = j * nx;
+        for (let i = 0; i < nx; i++) grid[row + i] = field(i / GX, y);
       }
 
-      const cellW = w / GX;
-      const cellH = h / GY;
       const env = ringEnv(t);
-      haze.clear();
+      const pix = hazePix.data;
+      let p = 0;
       for (let j = 0; j < GY; j++) {
+        const row = j * nx;
+        const row1 = row + nx;
         for (let i = 0; i < GX; i++) {
-          const ua = grid[j * nx + i];
-          const ub = grid[j * nx + i + 1];
-          const uc = grid[(j + 1) * nx + i + 1];
-          const ud = grid[(j + 1) * nx + i];
-          const avg = (ua + ub + uc + ud) * 0.25;
+          const avg = (grid[row + i] + grid[row + i + 1] + grid[row1 + i] + grid[row1 + i + 1]) * 0.25;
           const mag = Math.abs(avg);
-          if (mag < 0.04) continue;
-          haze.rect(i * cellW, j * cellH, cellW + 0.5, cellH + 0.5)
-            .fill({ color: avg >= 0 ? C.magenta : C.cyan, alpha: mag * 0.22 * env });
+          const a = mag < 0.04 ? 0 : Math.min(255, mag * 200 * env);
+          if (avg >= 0) { pix[p] = 224; pix[p + 1] = 56; pix[p + 2] = 233; }
+          else { pix[p] = 47; pix[p + 1] = 193; pix[p + 2] = 238; }
+          pix[p + 3] = a;
+          p += 4;
         }
       }
+      hazeCtx.putImageData(hazePix, 0, 0);
+      hazeTex.source.update();
+      haze.width = w;
+      haze.height = h;
 
       zeroSegs.length = 0;
       isoLo.length = 0;
-      isoHi.length = 0;
       pushContour(grid, nx, w, h, zeroSegs, (v) => v);
       pushContour(grid, nx, w, h, isoLo, (v) => Math.abs(v) - 0.35);
-      pushContour(grid, nx, w, h, isoHi, (v) => Math.abs(v) - 0.6);
 
       nodes.clear();
-      glowSegs(nodes, isoHi, C.cyan, 0.7, ISO_PASSES);
-      glowSegs(nodes, isoLo, C.magenta, 0.85, ISO_PASSES);
-      glowSegs(nodes, zeroSegs, C.magenta, 1.15);
-      glowSegs(nodes, zeroSegs, C.cyan, 0.6, [[10, 0.08], [2.2, 0.35]]);
-      glowSegs(nodes, zeroSegs, C.white, 0.55, [[1.2, 0.7]]);
+      glowSegs(nodes, isoLo, C.cyan, 0.85, ISO_PASSES);
+      glowSegs(nodes, zeroSegs, C.magenta, 1.1);
+      glowSegs(nodes, zeroSegs, C.white, 0.5, [[1.2, 0.65]]);
 
       bloom.x = w * 0.5;
       bloom.y = h * 0.5;
@@ -256,20 +298,19 @@ function chladniScene(PIXI, glow) {
       bloom.alpha = 0.12 + 0.18 * ((env - 0.88) / 0.12);
 
       trailSegs.length = 0;
-      const e = 0.018;
+      const e = 1 / GX;
       for (const s of sand) {
         if (dt > 0) {
-          const u = Math.abs(fieldAt(t, s.nx, s.ny));
-          const ux = Math.abs(fieldAt(t, s.nx + e, s.ny)) - Math.abs(fieldAt(t, s.nx - e, s.ny));
-          const uy = Math.abs(fieldAt(t, s.nx, s.ny + e)) - Math.abs(fieldAt(t, s.nx, s.ny - e));
-          // Down |u|: leave antinodes, pile on nodes.
+          const u0 = sampleGrid(grid, nx, s.nx, s.ny);
+          const u = Math.abs(u0);
+          const ux = Math.abs(sampleGrid(grid, nx, s.nx + e, s.ny)) - Math.abs(sampleGrid(grid, nx, s.nx - e, s.ny));
+          const uy = Math.abs(sampleGrid(grid, nx, s.nx, s.ny + e)) - Math.abs(sampleGrid(grid, nx, s.nx, s.ny - e));
           s.vx = s.vx * 0.86 - ux * 2.8;
           s.vy = s.vy * 0.86 - uy * 2.8;
           s.vx += rand(-0.0015, 0.0015);
           s.vy += rand(-0.0015, 0.0015);
           s.nx = clamp(s.nx + s.vx * dt, 0.02, 0.98);
           s.ny = clamp(s.ny + s.vy * dt, 0.02, 0.98);
-          // Traces only once a grain has found a node, so they don't web the antinodes.
           if (u < 0.22) {
             s.trail.push(s.nx, s.ny);
             if (s.trail.length > TRAIL * 2) s.trail.splice(0, 2);
@@ -297,8 +338,3 @@ function chladniScene(PIXI, glow) {
   };
 }
 
-function lerp2(x0, y0, x1, y1, u0, u1) {
-  const d = u0 - u1;
-  const t = Math.abs(d) < NODE_EPS ? 0.5 : u0 / d;
-  return [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t];
-}
