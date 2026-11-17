@@ -6,11 +6,12 @@
 #include <JuceHeader.h>
 #include <atomic>
 
-class fR3Z0AudioProcessor : public juce::AudioProcessor
+class fR3Z0AudioProcessor : public juce::AudioProcessor,
+                            private juce::AsyncUpdater
 {
 public:
     fR3Z0AudioProcessor();
-    ~fR3Z0AudioProcessor() override = default;
+    ~fR3Z0AudioProcessor() override { cancelPendingUpdate(); }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -49,6 +50,7 @@ public:
     void copySpectrum (float* dest, int n) const;
 
 private:
+    void handleAsyncUpdate() override;
     void applyPreset (int index);
     float loadf (const char* id, float fallback = 0.f) const;
     bool loadb (const char* id) const;
@@ -56,6 +58,8 @@ private:
 
     int currentProgram = 0;
     std::atomic<bool> killFlag { false };
+    bool lastKillParam = false;
+    std::atomic<float> pendingRoot { -1.f };
     float midiBend = 0.f; // semitones
     float bpm = 120.f;
 

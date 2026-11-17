@@ -74,6 +74,7 @@ void fR3Z0AudioProcessor::applyPreset (int index)
     setC (ParamID::scale, pr.scale);
     setB (ParamID::snap, pr.snap > 0.5f);
     setB (ParamID::freeze, false);
+    setB (ParamID::kill, false);
     setB (ParamID::bypass, false);
     for (int i = 0; i < fr3z0::kVoices; ++i)
     {
@@ -130,11 +131,8 @@ void fR3Z0AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         const auto m = meta.getMessage();
         if (m.isNoteOn())
         {
-            if (auto* p = apvts.getParameter (ParamID::rootMidi))
-            {
-                const float midiNote = (float) m.getNoteNumber();
-                p->setValueNotifyingHost (p->convertTo0to1 (midiNote));
-            }
+            pendingRoot.store ((float) m.getNoteNumber(), std::memory_order_relaxed);
+            triggerAsyncUpdate();
         }
         else if (m.isPitchWheel())
         {
@@ -146,6 +144,12 @@ void fR3Z0AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         if (auto pos = ph->getPosition())
             if (auto b = pos->getBpm())
                 bpm = (float) *b;
+
+    const bool killPulse = killFlag.exchange (false, std::memory_order_relaxed);
+    const bool killParam = loadb (ParamID::kill);
+    if (killPulse || (killParam && ! lastKillParam))
+        bank.reset();
+    lastKillParam = killParam;
 
     if (loadb (ParamID::bypass))
         return;
@@ -166,7 +170,9 @@ void fR3Z0AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
 
     fr3z0::BlockIn in;
-    in.rootMidi = loadf (ParamID::rootMidi, 60.f) + midiBend;
+    const float pending = pendingRoot.load (std::memory_order_relaxed);
+    const float root = pending >= 0.f ? pending : loadf (ParamID::rootMidi, 60.f);
+    in.rootMidi = root + midiBend;
     in.decay = loadf (ParamID::decay, 0.5f);
     in.intensity = loadf (ParamID::intensity, 0.4f);
     in.mix = loadf (ParamID::mix, 0.5f);
@@ -212,10 +218,6 @@ void fR3Z0AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         in.lfo[i].aVDecay = loadf (ParamID::lVDecay[i]);
     }
 
-    const bool kill = killFlag.exchange (false, std::memory_order_relaxed);
-    if (kill)
-        bank.reset();
-
     float* l = buffer.getWritePointer (0);
     float* r = chans > 1 ? buffer.getWritePointer (1) : l;
     if (chans == 1)
@@ -241,6 +243,17 @@ void fR3Z0AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             }
         }
     }
+}
+
+void fR3Z0AudioProcessor::handleAsyncUpdate()
+{
+    float n = pendingRoot.load (std::memory_order_relaxed);
+    if (n < 0.f)
+        return;
+    if (auto* p = apvts.getParameter (ParamID::rootMidi))
+        p->setValueNotifyingHost (p->convertTo0to1 (n));
+    if (! pendingRoot.compare_exchange_strong (n, -1.f, std::memory_order_relaxed))
+        triggerAsyncUpdate();
 }
 
 void fR3Z0AudioProcessor::getStateInformation (juce::MemoryBlock& destData)

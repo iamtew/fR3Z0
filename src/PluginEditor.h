@@ -99,7 +99,8 @@ private:
 
     juce::ComboBox lShape[2], lDiv[2];
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> lShapeA[2], lDivA[2];
-    Knob lRate[2], lDepth[2], lRoot[2], lDecay[2], lInt[2], lWidth[2], lMix[2];
+    Knob lRate[2], lDepth[2], lPhase[2], lRoot[2], lDecay[2], lInt[2], lWidth[2], lMix[2];
+    Knob lVFreq[2], lVGain[2], lVPan[2], lVDecay[2];
     juce::ToggleButton lSync[2], lUni[2];
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lSyncA[2], lUniA[2];
 

@@ -15,6 +15,7 @@ inline constexpr const char* lpHz       = "lpHz";
 inline constexpr const char* noise      = "noise";
 inline constexpr const char* color      = "color";
 inline constexpr const char* freeze     = "freeze";
+inline constexpr const char* kill       = "kill";
 inline constexpr const char* bypass     = "bypass";
 inline constexpr const char* scale      = "scale";
 inline constexpr const char* snap       = "snap";

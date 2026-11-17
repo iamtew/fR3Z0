@@ -21,6 +21,26 @@ inline float midiToHz (float midi)
     return 440.f * std::pow (2.f, (midi - 69.f) / 12.f);
 }
 
+inline float hzToMidi (float hz)
+{
+    return 69.f + 12.f * std::log2 (std::max (1.f, hz) / 440.f);
+}
+
+inline float wrap01 (float x)
+{
+    x -= std::floor (x);
+    return x;
+}
+
+inline float smoothToward (float& z, float target, float a, bool snap)
+{
+    if (snap)
+        z = target;
+    else
+        z += a * (target - z);
+    return z;
+}
+
 inline float intervalToHz (float rootHz, float semitones, float cents)
 {
     return rootHz * std::pow (2.f, (semitones + cents * 0.01f) / 12.f);
@@ -99,6 +119,45 @@ inline float snapMidi (float midi, int scale)
 inline float harmonicMul (int voiceIndex)
 {
     return (float) (voiceIndex + 1);
+}
+
+// Inverse of linked/unlinked voiceHz. Harmonic+link cannot set Hz via interval.
+struct VoiceTune
+{
+    float semi = 0.f;
+    float cents = 0.f;
+    bool writeInterval = true;
+};
+
+inline VoiceTune intervalFromHz (float hz, float rootMidi, bool link, int scale, bool snap)
+{
+    VoiceTune t;
+    if (scale == (int) Scale::Harmonic && link)
+    {
+        t.writeInterval = false;
+        return t;
+    }
+    float midi = hzToMidi (clampHz (hz));
+    if (snap)
+        midi = snapMidi (midi, scale);
+    const float base = link ? rootMidi : 60.f;
+    float delta = midi - base;
+    if (snap)
+    {
+        t.semi = std::max (-24.f, std::min (24.f, delta));
+        t.cents = 0.f;
+        return t;
+    }
+    float semi = std::floor (delta);
+    float cents = (delta - semi) * 100.f;
+    if (cents > 50.f)
+    {
+        semi += 1.f;
+        cents -= 100.f;
+    }
+    t.semi = std::max (-24.f, std::min (24.f, semi));
+    t.cents = std::max (-50.f, std::min (50.f, cents));
+    return t;
 }
 
 inline float lfoWave (int shape, float phase)
@@ -205,15 +264,14 @@ struct LfoState
     float hold = 0.f;
     Lcg rng;
 
-    float tick (int shape, float inc, bool unipolar)
+    float tick (int shape, float inc, bool unipolar, float phaseOff = 0.f)
     {
-        const float prev = phase;
-        phase += inc;
-        if (phase >= 1.f)
-            phase -= std::floor (phase);
-        if (shape == 4 && phase < prev)
+        const float prevOff = wrap01 (phase + phaseOff);
+        phase = wrap01 (phase + inc);
+        const float off = wrap01 (phase + phaseOff);
+        if (shape == 4 && off < prevOff)
             hold = rng.next();
-        const float bi = (shape == 4) ? hold : lfoWave (shape, phase);
+        const float bi = (shape == 4) ? hold : lfoWave (shape, off);
         return applyUni (bi, unipolar);
     }
 };

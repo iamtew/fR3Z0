@@ -57,6 +57,10 @@ struct Bank
     float lastGain[kVoices] {};
     float lastEnergy[kVoices] {};
     float lastLfo[kLfos] {};
+    float smMix = 0.5f, smOut = 1.f, smNoise = 0.f;
+    float smHpA = 0.f, smLpA = 0.f, smColorA = 0.f;
+    float smGL[kVoices] {}, smGR[kVoices] {}, smK[kVoices] {}, smGain[kVoices] {}, smPan[kVoices] {};
+    bool smoothSnap = true;
 
     void prepare (double sampleRate)
     {
@@ -73,6 +77,7 @@ struct Bank
         hpL.reset(); hpR.reset(); lpL.reset(); lpR.reset();
         colorL.reset(); colorR.reset();
         pinkL.reset(); pinkR.reset();
+        smoothSnap = true;
     }
 
     static float gFromHz (float hz, float sampleRate)
@@ -105,7 +110,8 @@ struct Bank
             float hz = L.rate;
             if (L.sync)
                 hz = (p.bpm / 60.f) * syncCyclesPerBeat (L.div);
-            const float val = lfo[li].tick (L.shape, std::max (0.f, hz) * invSr * (float) std::max (1, n), L.uni);
+            const float val = lfo[li].tick (L.shape, std::max (0.f, hz) * invSr * (float) std::max (1, n),
+                                           L.uni, L.phaseOff);
             lastLfo[li] = val;
             const float d = L.depth * val;
             modRoot   += d * L.aRoot;
@@ -163,8 +169,19 @@ struct Bank
             gain[i] = lastGain[i];
         }
 
+        const float smA = onePoleCoeff (20.f, sr);
+        const bool snap = smoothSnap;
+        smoothSnap = false;
+
         for (int s = 0; s < n; ++s)
         {
+            const float mixS = smoothToward (smMix, mix, smA, snap && s == 0);
+            const float outS = smoothToward (smOut, p.outGain, smA, snap && s == 0);
+            const float noiseS = smoothToward (smNoise, p.noise, smA, snap && s == 0);
+            const float hpS = smoothToward (smHpA, hpA, smA, snap && s == 0);
+            const float lpS = smoothToward (smLpA, lpA, smA, snap && s == 0);
+            const float colorS = smoothToward (smColorA, colorA, smA, snap && s == 0);
+
             float dryL = left[s];
             float dryR = right[s];
             float inL = dryL;
@@ -174,39 +191,44 @@ struct Bank
                 inL = 0.f;
                 inR = 0.f;
             }
-            if (p.noise > 0.f)
+            if (noiseS > 0.f)
             {
-                inL += p.noise * pinkL.process (white.next());
-                inR += p.noise * pinkR.process (white.next());
+                inL += noiseS * pinkL.process (white.next());
+                inR += noiseS * pinkR.process (white.next());
             }
-            inL = hpL.hp (inL, hpA);
-            inR = hpR.hp (inR, hpA);
-            inL = lpL.lp (inL, lpA);
-            inR = lpR.lp (inR, lpA);
+            inL = hpL.hp (inL, hpS);
+            inR = hpR.hp (inR, hpS);
+            inL = lpL.lp (inL, lpS);
+            inR = lpR.lp (inR, lpS);
 
             float wetL = 0.f, wetR = 0.f;
             for (int i = 0; i < kVoices; ++i)
             {
                 if (! on[i])
                     continue;
-                const float bpL = voices[i].l.band (inL, gL[i], k[i]);
-                const float bpR = voices[i].r.band (inR, gR[i], k[i]);
-                const float pan = lastPan[i];
-                const float gLpan = std::min (1.f, 1.f - pan) * gain[i];
-                const float gRpan = std::min (1.f, 1.f + pan) * gain[i];
+                const bool snap0 = snap && s == 0;
+                const float gLs = smoothToward (smGL[i], gL[i], smA, snap0);
+                const float gRs = smoothToward (smGR[i], gR[i], smA, snap0);
+                const float kS = smoothToward (smK[i], k[i], smA, snap0);
+                const float gnS = smoothToward (smGain[i], gain[i], smA, snap0);
+                const float pan = smoothToward (smPan[i], lastPan[i], smA, snap0);
+                const float bpL = voices[i].l.band (inL, gLs, kS);
+                const float bpR = voices[i].r.band (inR, gRs, kS);
+                const float gLpan = std::min (1.f, 1.f - pan) * gnS;
+                const float gRpan = std::min (1.f, 1.f + pan) * gnS;
                 wetL += bpL * gLpan;
                 wetR += bpR * gRpan;
-                const float mag = std::max (std::abs (bpL), std::abs (bpR)) * gain[i];
+                const float mag = std::max (std::abs (bpL), std::abs (bpR)) * gnS;
                 auto& e = voices[i].energy;
                 e = mag > e ? mag : e * 0.999f;
             }
 
-            wetL = colorL.lp (wetL, colorA);
-            wetR = colorR.lp (wetR, colorA);
-            float outL = dryL * (1.f - mix) + wetL * mix;
-            float outR = dryR * (1.f - mix) + wetR * mix;
-            outL = softclip (outL * p.outGain);
-            outR = softclip (outR * p.outGain);
+            wetL = colorL.lp (wetL, colorS);
+            wetR = colorR.lp (wetR, colorS);
+            float outL = dryL * (1.f - mixS) + wetL * mixS;
+            float outR = dryR * (1.f - mixS) + wetR * mixS;
+            outL = softclip (outL * outS);
+            outR = softclip (outR * outS);
             left[s] = outL;
             right[s] = outR;
         }

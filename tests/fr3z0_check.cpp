@@ -58,6 +58,23 @@ int main()
     float v = s.tick (0, 0.25f, false);
     expect (std::fabs (v) <= 1.001f, "lfo bounds");
 
+    LfoState p0, p1;
+    expectNear (p0.tick (0, 0.f, false, 0.f), 0.f, 0.001f, "phase 0 sine");
+    expectNear (p1.tick (0, 0.f, false, 0.25f), 1.f, 0.001f, "phase 0.25 sine peak");
+
+    const auto oct = intervalFromHz (midiToHz (72.f), 60.f, true, (int) Scale::Chromatic, false);
+    expect (oct.writeInterval, "linked writes interval");
+    expectNear (oct.semi, 12.f, 0.01f, "linked C4+12 semi");
+    expectNear (oct.cents, 0.f, 0.5f, "linked C4+12 cents");
+
+    const auto a4 = intervalFromHz (440.f, 60.f, false, (int) Scale::Chromatic, false);
+    expectNear (a4.semi, 9.f, 0.01f, "unlinked A4 vs MIDI 60");
+    expectNear (a4.cents, 0.f, 0.5f, "unlinked A4 cents");
+
+    auto harm = intervalFromHz (880.f, 36.f, true, (int) Scale::Harmonic, false);
+    expect (! harm.writeInterval, "harmonic+link skips interval");
+    expectNear (harm.semi, 0.f, 0.001f, "harmonic leaves default semi");
+
     expect (kPresetCount == 10, "preset count");
     expect (kPresets[1].v[0].on > 0.5f, "minor root on");
     expect (kPresets[1].v[1].semi == 3.f, "minor third");
@@ -79,6 +96,7 @@ int main()
         energy += std::fabs (L[i]);
     expect (energy > 0.1f, "impulse rings");
     expect (bank.lastHz[0] > 20.f, "voice hz");
+    expectNear (bank.smGL[0], Bank::gFromHz (bank.lastHz[0] / std::pow (2.f, 0.f), 48000.f), 1.0e-5f, "smooth snap first block");
 
     bank.reset();
     float sum = 0.f;

@@ -262,15 +262,23 @@ void fR3Z0AudioProcessorEditor::writeVoice (int i, float hz, float gain)
     float rootMidi = 60.f;
     if (auto* rp = proc.apvts.getRawParameterValue (ParamID::rootMidi))
         rootMidi = rp->load();
-    const float midi = 69.f + 12.f * std::log2 (juce::jmax (20.f, hz) / 440.f);
-    float semi = midi - rootMidi;
-    if (auto* snapP = proc.apvts.getRawParameterValue (ParamID::snap))
-        if (snapP->load() > 0.5f)
-            if (auto* sc = proc.apvts.getRawParameterValue (ParamID::scale))
-                semi = fr3z0::snapMidi (rootMidi + semi, juce::roundToInt (sc->load())) - rootMidi;
-    semi = juce::jlimit (-24.f, 24.f, semi);
-    if (auto* p = proc.apvts.getParameter (ParamID::vSemi[i]))
-        p->setValueNotifyingHost (p->convertTo0to1 (semi));
+    bool link = true;
+    if (auto* lp = proc.apvts.getRawParameterValue (ParamID::vLink[i]))
+        link = lp->load() > 0.5f;
+    bool snap = false;
+    if (auto* sp = proc.apvts.getRawParameterValue (ParamID::snap))
+        snap = sp->load() > 0.5f;
+    int scale = 0;
+    if (auto* sc = proc.apvts.getRawParameterValue (ParamID::scale))
+        scale = juce::roundToInt (sc->load());
+    const auto t = fr3z0::intervalFromHz (hz, rootMidi, link, scale, snap);
+    if (t.writeInterval)
+    {
+        if (auto* p = proc.apvts.getParameter (ParamID::vSemi[i]))
+            p->setValueNotifyingHost (p->convertTo0to1 (t.semi));
+        if (auto* p = proc.apvts.getParameter (ParamID::vCents[i]))
+            p->setValueNotifyingHost (p->convertTo0to1 (t.cents));
+    }
     if (auto* p = proc.apvts.getParameter (ParamID::vGain[i]))
         p->setValueNotifyingHost (p->convertTo0to1 (juce::jlimit (0.f, 2.f, gain)));
 }
@@ -318,7 +326,12 @@ fR3Z0AudioProcessorEditor::fR3Z0AudioProcessorEditor (fR3Z0AudioProcessor& p)
     bindKnob (vDecay, ParamID::vDecay[0], "V Decay");
     bindKnob (vQ, ParamID::vQ[0], "Q");
 
-    kill.onClick = [this] { proc.requestKill(); };
+    kill.onClick = [this]
+    {
+        proc.requestKill();
+        if (auto* p = proc.apvts.getParameter (ParamID::kill))
+            p->setValueNotifyingHost (1.f);
+    };
     presetBar.onStep = [this] (int d) { stepPreset (d); };
     presetBar.onOpen = [this] { openPresetMenu(); };
 
@@ -332,11 +345,16 @@ fR3Z0AudioProcessorEditor::fR3Z0AudioProcessorEditor (fR3Z0AudioProcessor& p)
         bindCombo (lDiv[i], lDivA[i], ParamID::lDiv[i]);
         bindKnob (lRate[i], ParamID::lRate[i], "Rate");
         bindKnob (lDepth[i], ParamID::lDepth[i], "Depth");
+        bindKnob (lPhase[i], ParamID::lPhase[i], "Phase");
         bindKnob (lRoot[i], ParamID::lRoot[i], "Root");
         bindKnob (lDecay[i], ParamID::lDecay[i], "Decay");
         bindKnob (lInt[i], ParamID::lInt[i], "Int");
         bindKnob (lWidth[i], ParamID::lWidth[i], "Width");
         bindKnob (lMix[i], ParamID::lMix[i], "Mix");
+        bindKnob (lVFreq[i], ParamID::lVFreq[i], "VHz");
+        bindKnob (lVGain[i], ParamID::lVGain[i], "VGn");
+        bindKnob (lVPan[i], ParamID::lVPan[i], "VPn");
+        bindKnob (lVDecay[i], ParamID::lVDecay[i], "VDc");
         lSync[i].setButtonText ("Sync");
         lUni[i].setButtonText ("Uni");
         content.addAndMakeVisible (lSync[i]);
@@ -512,10 +530,15 @@ void fR3Z0AudioProcessorEditor::layoutContent()
         lSync[i].setBounds (row1.removeFromLeft (48).reduced (2, 1));
         lDiv[i].setBounds (row1.removeFromLeft (72).reduced (2, 1));
         lUni[i].setBounds (row1.removeFromLeft (48).reduced (2, 1));
-        Knob* lk[] = { &lRate[i], &lDepth[i], &lRoot[i], &lDecay[i], &lInt[i], &lWidth[i], &lMix[i] };
-        const int lw = col.getWidth() / 7;
+        auto kTop = col.removeFromTop (col.getHeight() / 2);
+        Knob* lk1[] = { &lRate[i], &lDepth[i], &lPhase[i], &lRoot[i], &lDecay[i], &lInt[i], &lWidth[i] };
+        const int lw1 = kTop.getWidth() / 7;
         for (int j = 0; j < 7; ++j)
-            place (*lk[j], col.removeFromLeft (lw).reduced (2, 0));
+            place (*lk1[j], kTop.removeFromLeft (lw1).reduced (2, 0));
+        Knob* lk2[] = { &lMix[i], &lVFreq[i], &lVGain[i], &lVPan[i], &lVDecay[i] };
+        const int lw2 = col.getWidth() / 5;
+        for (int j = 0; j < 5; ++j)
+            place (*lk2[j], col.removeFromLeft (lw2).reduced (2, 0));
     }
 }
 
@@ -544,6 +567,10 @@ void fR3Z0AudioProcessorEditor::timerCallback()
         vQ.a = std::make_unique<SA> (proc.apvts, ParamID::vQ[sel], vQ.s);
         attachedVoice = sel;
     }
+    if (auto* kp = proc.apvts.getRawParameterValue (ParamID::kill))
+        if (kp->load() > 0.5f)
+            if (auto* p = proc.apvts.getParameter (ParamID::kill))
+                p->setValueNotifyingHost (0.f);
     graph.repaint();
     refreshBar();
     content.repaint (wellVoice);

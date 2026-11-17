@@ -35,6 +35,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     addF (ParamID::noise, "Noise", { 0.f, 1.f, 0.001f }, 0.f);
     addF (ParamID::color, "Color", { 0.f, 1.f, 0.001f }, 0.7f);
     addB (ParamID::freeze, "Freeze", false);
+    addB (ParamID::kill, "Kill", false);
     addB (ParamID::bypass, "Bypass", false);
     addB (ParamID::snap, "Snap", false);
     addB (ParamID::spectrum, "Spectrum", false);
