@@ -12,7 +12,7 @@ Standalone stays in the jucer for debug and `just docs-screenshots`. Do not ship
 - APVTS for all parameters
 - Just + justfile
 - JUCE from `%USERPROFILE%\JUCE`
-- `assets/logo.png` is the Affinity export. Source of truth. Never overwrite. `just icon` / `just docs-logo` derive the rest.
+- Clanker never modifies `assets/logo.png` or `assets/logo.af`. Meat Bag owns the Affinity export; that PNG is source of truth. Only derived files: `just docs-logo` → `docs/logo.png`, `just icon` → `Builds/VisualStudio2022/icon.ico`.
 
 ## Layout
 src/
