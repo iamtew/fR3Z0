@@ -82,7 +82,7 @@ header {
   text-decoration: none;
 }
 
-.brand img { width: 36px; height: 36px; display: block; }
+.brand img { height: 36px; width: auto; display: block; }
 
 .nav-toggle {
   display: none;
@@ -168,7 +168,7 @@ main.landing {
   margin-bottom: 1.2rem;
 }
 
-.hero { display: block; flex-shrink: 0; width: 160px; height: 160px; }
+.hero { display: block; flex-shrink: 0; height: 160px; width: auto; }
 
 h1, h2 { color: var(--orange); margin: 0 0 0.4rem; }
 
@@ -457,6 +457,6 @@ strong { color: var(--orange); }
   .nav a { padding: 8px 12px; }
   .nav-group { flex-basis: 100%; margin: 8px 12px 0; }
   .doc { padding: 20px 16px 64px; }
-  .hero { width: 112px; height: 112px; }
+  .hero { height: 112px; width: auto; }
   h1 { font-size: 1.8rem; }
 }
