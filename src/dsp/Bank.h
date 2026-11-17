@@ -57,6 +57,7 @@ struct Bank
     float lastGain[kVoices] {};
     float lastEnergy[kVoices] {};
     float lastLfo[kLfos] {};
+    float lastLfoPhase[kLfos] {};
     float smMix = 0.5f, smOut = 1.f, smNoise = 0.f;
     float smHpA = 0.f, smLpA = 0.f, smColorA = 0.f;
     float smGL[kVoices] {}, smGR[kVoices] {}, smK[kVoices] {}, smGain[kVoices] {}, smPan[kVoices] {};
@@ -113,6 +114,7 @@ struct Bank
             const float val = lfo[li].tick (L.shape, std::max (0.f, hz) * invSr * (float) std::max (1, n),
                                            L.uni, L.phaseOff);
             lastLfo[li] = val;
+            lastLfoPhase[li] = wrap01 (lfo[li].phase + L.phaseOff);
             const float d = L.depth * val;
             modRoot   += d * L.aRoot;
             modDecay  += d * L.aDecay;

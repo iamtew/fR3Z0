@@ -46,7 +46,7 @@ public:
 
     std::atomic<int> selected { 0 };
 
-    void copyViz (float* hz, float* q, float* pan, float* gain, float* energy, float* lfoOut) const;
+    void copyViz (float* hz, float* q, float* pan, float* gain, float* energy, float* lfoOut, float* lfoPhase) const;
     void copySpectrum (float* dest, int n) const;
 
 private:

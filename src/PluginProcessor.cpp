@@ -101,7 +101,7 @@ const juce::String fR3Z0AudioProcessor::getProgramName (int index)
     return fr3z0::kPresetNames[index];
 }
 
-void fR3Z0AudioProcessor::copyViz (float* hz, float* q, float* pan, float* gain, float* energy, float* lfoOut) const
+void fR3Z0AudioProcessor::copyViz (float* hz, float* q, float* pan, float* gain, float* energy, float* lfoOut, float* lfoPhase) const
 {
     for (int i = 0; i < fr3z0::kVoices; ++i)
     {
@@ -113,6 +113,8 @@ void fR3Z0AudioProcessor::copyViz (float* hz, float* q, float* pan, float* gain,
     }
     lfoOut[0] = bank.lastLfo[0];
     lfoOut[1] = bank.lastLfo[1];
+    lfoPhase[0] = bank.lastLfoPhase[0];
+    lfoPhase[1] = bank.lastLfoPhase[1];
 }
 
 void fR3Z0AudioProcessor::copySpectrum (float* dest, int n) const
