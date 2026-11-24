@@ -179,22 +179,40 @@ void fR3Z0AudioProcessorEditor::Graph::paint (juce::Graphics& g)
                         && ed.proc.apvts.getRawParameterValue (ParamID::spectrum)->load() > 0.5f;
     if (specOn)
     {
-        juce::Path sp;
-        const int bins = 256;
-        for (int i = 1; i < bins; ++i)
+        const float sr = ed.proc.getSampleRate() > 0 ? (float) ed.proc.getSampleRate() : 44100.f;
+        const int steps = 256;
+        auto curve = [&] (const float* mags)
         {
-            const float hz = xToHz ((float) i / (float) bins * area.getWidth(), area.getWidth());
-            const float bin = hz / (ed.proc.getSampleRate() > 0 ? (float) ed.proc.getSampleRate() : 44100.f)
-                              * (float) (fr3z0::kFftSize / 2);
-            const int b = juce::jlimit (0, 255, (int) bin);
-            const float mag = juce::jlimit (0.f, 1.f, ed.specOut[b] * 40.f);
-            const float x = area.getX() + area.getWidth() * (float) i / (float) bins;
-            const float y = area.getBottom() - mag * area.getHeight();
-            if (i == 1) sp.startNewSubPath (x, y);
-            else sp.lineTo (x, y);
-        }
-        g.setColour (kBlue.withAlpha (0.45f));
-        g.strokePath (sp, juce::PathStrokeType (1.2f));
+            juce::Path p;
+            for (int i = 0; i < steps; ++i)
+            {
+                const float t = (float) i / (float) (steps - 1);
+                const float hz = xToHz (t * area.getWidth(), area.getWidth());
+                const int b = juce::jlimit (0, kFftBins - 1, (int) fftBin (hz, sr));
+                const float mag = fftMagToUnit (mags[b]);
+                const float x = area.getX() + t * area.getWidth();
+                const float y = area.getBottom() - mag * area.getHeight();
+                if (i == 0) p.startNewSubPath (x, y);
+                else p.lineTo (x, y);
+            }
+            return p;
+        };
+        auto filled = [&] (juce::Path p)
+        {
+            p.lineTo (area.getRight(), area.getBottom());
+            p.lineTo (area.getX(), area.getBottom());
+            p.closeSubPath();
+            return p;
+        };
+
+        g.setColour (juce::Colour (0xff8a8a8a).withAlpha (0.45f));
+        g.fillPath (filled (curve (ed.specIn)));
+
+        const auto outCurve = curve (ed.specOut);
+        g.setColour (kLight.withAlpha (0.28f));
+        g.fillPath (filled (outCurve));
+        g.setColour (kLight.withAlpha (0.9f));
+        g.strokePath (outCurve, juce::PathStrokeType (1.4f));
     }
 
     const int sel = ed.proc.selectedVoice();

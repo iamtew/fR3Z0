@@ -37,7 +37,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     addB (ParamID::kill, "Kill", false);
     addB (ParamID::bypass, "Bypass", false);
     addB (ParamID::snap, "Snap", false);
-    addB (ParamID::spectrum, "Spectrum", false);
+    addB (ParamID::spectrum, "Spectrum", true);
     layout.add (std::make_unique<C> (ID { ParamID::scale, 1 }, "Scale",
                                      juce::StringArray { "Chromatic", "Major", "Minor", "Harmonic" }, 0));
 
