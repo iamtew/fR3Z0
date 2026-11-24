@@ -84,6 +84,10 @@ int main()
     expect (kPresets[1].v[0].on > 0.5f, "minor root on");
     expect (kPresets[1].v[1].semi == 3.f, "minor third");
     expect (kPresets[2].v[1].semi == 4.f, "major third");
+    for (int i = 0; i < kPresetCount; ++i)
+        if (i != 4)
+            expect (kPresets[i].noise == 0.f, "factory noise off except drone");
+    expect (kPresets[4].noise > 0.f, "drone keeps noise");
 
     Bank bank;
     bank.prepare (48000.0);
