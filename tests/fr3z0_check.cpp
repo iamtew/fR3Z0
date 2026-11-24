@@ -30,6 +30,11 @@ int main()
 {
     using namespace fr3z0;
 
+    expectNear (fftBin (440.f, 44100.f), 440.f * (float) kFftSize / 44100.f, 0.01f, "fft bin A4");
+    expectNear (fftMagToUnit (1.0e-12f), 0.f, 0.001f, "fft silence");
+    expectNear (fftMagToUnit (1.f), 1.f, 0.001f, "fft 0 dBFS");
+    expect (fftMagToUnit (0.f) < 0.001f, "fft zero mag");
+
     expectNear (midiToHz (69.f), 440.f, 0.01f, "A4");
     expectNear (intervalToHz (440.f, 12.f, 0.f), 880.f, 0.02f, "octave");
     expectNear (intervalToHz (100.f, 0.f, 100.f), 100.f * std::pow (2.f, 1.f / 12.f), 0.05f, "cents");

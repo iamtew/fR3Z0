@@ -11,6 +11,20 @@ constexpr int kVoices = 8;
 constexpr int kLfos = 2;
 constexpr int kFftOrder = 10;
 constexpr int kFftSize = 1 << kFftOrder;
+constexpr int kFftBins = kFftSize / 2;
+
+inline float fftBin (float hz, float sampleRate)
+{
+    const float sr = sampleRate > 1.f ? sampleRate : 44100.f;
+    return hz * (float) kFftSize / sr;
+}
+
+// mag is |bin| / N.  Silence → 0, 0 dBFS → 1.
+inline float fftMagToUnit (float mag)
+{
+    const float db = 20.f * std::log10 (std::max (mag, 1.0e-12f));
+    return std::max (0.f, std::min (1.f, (db + 90.f) / 90.f));
+}
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kTwoPi = 6.28318530717958647692f;
 constexpr float kMinHz = 20.f;
