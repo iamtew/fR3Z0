@@ -8,10 +8,11 @@ fR3Z0AudioProcessor::fR3Z0AudioProcessor()
 {
 }
 
-void fR3Z0AudioProcessor::prepareToPlay (double sampleRate, int)
+void fR3Z0AudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     bank.prepare (sampleRate);
     fifoPos = 0;
+    dryScratch.setSize (2, juce::jmax (1, samplesPerBlock), false, false, true);
 }
 
 bool fR3Z0AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -117,11 +118,46 @@ void fR3Z0AudioProcessor::copyViz (float* hz, float* q, float* pan, float* gain,
     lfoPhase[1] = bank.lastLfoPhase[1];
 }
 
-void fR3Z0AudioProcessor::copySpectrum (float* dest, int n) const
+void fR3Z0AudioProcessor::copySpectrum (float* destIn, float* destOut, int n) const
 {
     const int m = juce::jmin (n, fr3z0::kFftSize / 2);
     for (int i = 0; i < m; ++i)
-        dest[i] = specMag[i];
+    {
+        destIn[i] = specIn[i];
+        destOut[i] = specOut[i];
+    }
+}
+
+void fR3Z0AudioProcessor::analyseWindow (const float* src, float* destMag)
+{
+    const int n = fr3z0::kFftSize;
+    const float invNm1 = 1.f / (float) (n - 1);
+    for (int i = 0; i < n; ++i)
+    {
+        const float hann = 0.5f * (1.f - std::cos (fr3z0::kTwoPi * (float) i * invNm1));
+        fftWork[i] = src[i] * hann;
+    }
+    juce::FloatVectorOperations::clear (fftWork + n, n);
+    fft.performFrequencyOnlyForwardTransform (fftWork);
+    const float invN = 1.f / (float) n;
+    const int bins = n / 2;
+    for (int b = 0; b < bins; ++b)
+        destMag[b] = fftWork[b] * invN;
+}
+
+void fR3Z0AudioProcessor::feedSpectrum (const float* dryL, const float* dryR, const float* wetL, const float* wetR, int n)
+{
+    for (int i = 0; i < n; ++i)
+    {
+        fifoIn[fifoPos] = 0.5f * (dryL[i] + dryR[i]);
+        fifoOut[fifoPos] = 0.5f * (wetL[i] + wetR[i]);
+        if (++fifoPos >= fr3z0::kFftSize)
+        {
+            fifoPos = 0;
+            analyseWindow (fifoIn, specIn);
+            analyseWindow (fifoOut, specOut);
+        }
+    }
 }
 
 void fR3Z0AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -153,18 +189,13 @@ void fR3Z0AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         bank.reset();
     lastKillParam = killParam;
 
-    if (loadb (ParamID::bypass))
-        return;
-
-    if (buffer.getNumChannels() == 1)
-    {
-        // Duplicate later; process as mono in both pointers.
-    }
-
     const int n = buffer.getNumSamples();
     const int chans = buffer.getNumChannels();
     if (chans == 0 || n == 0)
         return;
+
+    const bool specOn = loadb (ParamID::spectrum);
+    const bool bypassed = loadb (ParamID::bypass);
 
     if (chans == 1)
     {
@@ -222,29 +253,36 @@ void fR3Z0AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     float* l = buffer.getWritePointer (0);
     float* r = chans > 1 ? buffer.getWritePointer (1) : l;
-    if (chans == 1)
-    {
-        // Bank writes both; same pointer is OK for mono.
-    }
-    bank.process (l, r, n, in);
 
-    if (loadb (ParamID::spectrum))
+    if (bypassed)
     {
-        for (int i = 0; i < n; ++i)
+        if (specOn)
+            feedSpectrum (l, r, l, r, n);
+        return;
+    }
+
+    const float* dryL = l;
+    const float* dryR = r;
+    if (specOn)
+    {
+        const int cap = juce::jmin (n, dryScratch.getNumSamples());
+        dryScratch.copyFrom (0, 0, l, cap);
+        if (chans > 1)
+            dryScratch.copyFrom (1, 0, r, cap);
+        else
+            dryScratch.copyFrom (1, 0, l, cap);
+        dryL = dryScratch.getReadPointer (0);
+        dryR = dryScratch.getReadPointer (1);
+        if (n > cap)
         {
-            fifo[fifoPos++] = 0.5f * (l[i] + (r == l ? l[i] : r[i]));
-            if (fifoPos >= fr3z0::kFftSize)
-            {
-                fifoPos = 0;
-                juce::FloatVectorOperations::copy (fftWork, fifo, fr3z0::kFftSize);
-                juce::FloatVectorOperations::clear (fftWork + fr3z0::kFftSize, fr3z0::kFftSize);
-                fft.performFrequencyOnlyForwardTransform (fftWork);
-                const int bins = fr3z0::kFftSize / 2;
-                for (int b = 0; b < bins; ++b)
-                    specMag[b] = fftWork[b] * (1.f / (float) fr3z0::kFftSize);
-            }
+            // ponytail: host block bigger than prepare; skip the tail
         }
     }
+
+    bank.process (l, r, n, in);
+
+    if (specOn)
+        feedSpectrum (dryL, dryR, l, r, juce::jmin (n, dryScratch.getNumSamples()));
 }
 
 void fR3Z0AudioProcessor::handleAsyncUpdate()

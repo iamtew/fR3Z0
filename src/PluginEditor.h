@@ -109,7 +109,8 @@ private:
     int dragVoice = -1;
     int attachedVoice = -1;
     float vizHz[8] {}, vizQ[8] {}, vizPan[8] {}, vizGain[8] {}, vizEnergy[8] {}, vizLfo[2] {}, vizLfoPhase[2] {};
-    float spec[512] {};
+    float specIn[512] {};
+    float specOut[512] {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (fR3Z0AudioProcessorEditor)
 };

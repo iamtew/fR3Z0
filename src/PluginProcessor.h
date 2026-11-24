@@ -48,7 +48,7 @@ public:
     std::atomic<int> selected { 0 };
 
     void copyViz (float* hz, float* q, float* pan, float* gain, float* energy, float* lfoOut, float* lfoPhase) const;
-    void copySpectrum (float* dest, int n) const;
+    void copySpectrum (float* destIn, float* destOut, int n) const;
 
 private:
     void handleAsyncUpdate() override;
@@ -56,6 +56,8 @@ private:
     float loadf (const char* id, float fallback = 0.f) const;
     bool loadb (const char* id) const;
     int loadi (const char* id) const;
+    void analyseWindow (const float* src, float* destMag);
+    void feedSpectrum (const float* dryL, const float* dryR, const float* wetL, const float* wetR, int n);
 
     int currentProgram = 0;
     std::atomic<bool> killFlag { false };
@@ -66,9 +68,12 @@ private:
 
     juce::dsp::FFT fft { fr3z0::kFftOrder };
     alignas (16) float fftWork[fr3z0::kFftSize * 2] {};
-    float specMag[fr3z0::kFftSize / 2] {};
+    float specIn[fr3z0::kFftSize / 2] {};
+    float specOut[fr3z0::kFftSize / 2] {};
     int fifoPos = 0;
-    float fifo[fr3z0::kFftSize] {};
+    float fifoIn[fr3z0::kFftSize] {};
+    float fifoOut[fr3z0::kFftSize] {};
+    juce::AudioBuffer<float> dryScratch;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (fR3Z0AudioProcessor)
 };

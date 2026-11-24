@@ -187,7 +187,7 @@ void fR3Z0AudioProcessorEditor::Graph::paint (juce::Graphics& g)
             const float bin = hz / (ed.proc.getSampleRate() > 0 ? (float) ed.proc.getSampleRate() : 44100.f)
                               * (float) (fr3z0::kFftSize / 2);
             const int b = juce::jlimit (0, 255, (int) bin);
-            const float mag = juce::jlimit (0.f, 1.f, ed.spec[b] * 40.f);
+            const float mag = juce::jlimit (0.f, 1.f, ed.specOut[b] * 40.f);
             const float x = area.getX() + area.getWidth() * (float) i / (float) bins;
             const float y = area.getBottom() - mag * area.getHeight();
             if (i == 1) sp.startNewSubPath (x, y);
@@ -633,7 +633,7 @@ void fR3Z0AudioProcessorEditor::layoutContent()
 void fR3Z0AudioProcessorEditor::timerCallback()
 {
     proc.copyViz (vizHz, vizQ, vizPan, vizGain, vizEnergy, vizLfo, vizLfoPhase);
-    proc.copySpectrum (spec, 256);
+    proc.copySpectrum (specIn, specOut, 512);
     const int sel = proc.selectedVoice();
     if (sel != attachedVoice && sel >= 0 && sel < fr3z0::kVoices)
     {
